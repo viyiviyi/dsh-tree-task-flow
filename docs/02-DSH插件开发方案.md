@@ -1,4 +1,4 @@
-# dsh-task-tree 插件设计
+# dsh-tree-task-flow 插件设计（树形任务流）
 
 把一件需要多步做完的事组织成**目标 → 任务 → 子任务**三级树，让每个节点完成时
 由模型提交结果，插件随即把这个节点的**执行过程**从上下文里折叠掉。
@@ -149,7 +149,7 @@ surface 上**，不要求它是本插件放的。
 ```
 role:    user
 content: [{ type: "text", text: <各节点提交的结果> }]
-source:  { kind: "plugin", plugin: "dsh-task-tree", form: "notice", summary: <一行摘要> }
+source:  { kind: "plugin", plugin: "dsh-tree-task-flow", form: "notice", summary: <一行摘要> }
 ```
 
 用 `notice` + `summary`，界面把它渲染成一行可读的说明，展开才是正文。
@@ -221,7 +221,7 @@ import 任何 `@deepseek-ai/*` 运行时模块都会在加载时直接炸掉。
 
 ## 7. 系统提示词
 
-**只有一个段落，静态，会话内逐字节不变**，注册名 `dsh-task-tree`，默认 order `2000`
+**只有一个段落，静态，会话内逐字节不变**，注册名 `dsh-tree-task-flow`，默认 order `2000`
 （在部署人设 0、计划策略 500 之后，所有内置工具指引之前）。正文见 `lib/prompt.js`。
 
 注册必须包在 `ctx.effect()` 里，否则热更新后会重复注册而抛错。
@@ -280,7 +280,7 @@ import 任何 `@deepseek-ai/*` 运行时模块都会在加载时直接炸掉。
 | `/task-tree resume` | 重新允许自动续行 |
 | `/task-tree reset` | 清掉本会话的计划树 |
 
-### 9.3 任务树条目
+### 9.3 树形任务流条目
 
 注册到 `conversation.input.dock`——输入框上方的整宽条目区，和内置的待办、目标条目
 并排。宽度按内置条目的算法算：
@@ -323,7 +323,7 @@ margin:       0 auto
 ## 11. 工程结构
 
 ```
-dsh-task-tree/
+dsh-tree-task-flow/
 ├─ package.json          dsh.bundle.patch / dsh.client 声明
 ├─ cordis.patch.yml      bundle 层：把 task-tree 这一行插进 profile
 ├─ enable.example.yml    启用示例

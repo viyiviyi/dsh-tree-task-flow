@@ -110,7 +110,7 @@ apply(on.ctx, { enabled: true, rootDir: stateRoot() });
 const names = on.tools.map((tool) => tool.name).sort();
 const toolNames = names.join(", ");
 
-check("插件名是 dsh-task-tree", PLUGIN_NAME === "dsh-task-tree", PLUGIN_NAME);
+check("插件名是 dsh-tree-task-flow", PLUGIN_NAME === "dsh-tree-task-flow", PLUGIN_NAME);
 check(
   "inject 只声明 systemPrompt 与 tools",
   inject.length === 2 && inject.includes("systemPrompt") && inject.includes("tools"),

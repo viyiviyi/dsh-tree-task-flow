@@ -17,4 +17,4 @@
 #   rootDir            插件状态目录                    默认 $DSH_HOME/dsh-task-tree
 - insert:
     - id: task-tree
-      name: 'dsh-task-tree'
+      name: 'dsh-tree-task-flow'

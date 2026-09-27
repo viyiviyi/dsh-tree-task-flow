@@ -1,7 +1,7 @@
-# dsh-task-tree
+# dsh-tree-task-flow · 树形任务流
 
-给 DeepSeek Harness 的**三级任务树**：把一件需要多步做完的事组织成
-**目标 → 任务 → 子任务**，每个节点完成时由模型提交结果，插件随即把这个节点的
+给 DeepSeek Harness 的**树形任务流**：把一件需要多步做完的事组织成
+**目标 → 任务 → 子任务**三级树，每个节点完成时由模型提交结果，插件随即把这个节点的
 **执行过程**从上下文里折叠掉，只留下那条结果。
 
 装上不等于启用。插件默认关闭，不会在没人点头的时候改动任何会话。
@@ -81,17 +81,18 @@
 
 需要 Node.js 22.19 以上，以及能运行 `dsh`。
 
-**从源码目录安装**（装成 `link:`，改完源码重启即生效）：
+**从源码目录安装**（装成 `link:`，改完源码重启即生效）。把仓库克隆到任意目录，
+然后指向那个目录：
 
 ```powershell
-dsh plugin --profile web add C:\apps\dsh_workspace\dsh-task-tree
+dsh plugin --profile web add <插件目录>
 dsh --profile web --dump-config          # 输出里应出现 task-tree 这一行
 ```
 
 **从 npm 安装**：
 
 ```powershell
-dsh plugin --profile web add dsh-task-tree
+dsh plugin --profile web add dsh-tree-task-flow
 ```
 
 **装完必须重启 `dsh web`**——运行中的会话不追溯。
@@ -118,14 +119,14 @@ dsh plugin --profile web add dsh-task-tree
 
 ## 界面
 
-**输入框上方的任务树条目**（和内置的待办、目标条目并排，宽度与消息正文对齐）：
+**输入框上方的「树形任务流」条目**（和内置的待办、目标条目并排，宽度与消息正文对齐）：
 
 - 折叠时一行：标题 + `已完成/总数 · 当前节点`
 - 展开后是三级树，当前节点高亮，已完成节点直接显示已提交的结果
 - 节点上可以直接完成、丢弃，不用敲命令
 - 顶部状态条：「停止自动续行」「清空计划」「刷新」
 
-**设置 → 任务树**：显示插件当前是启用还是未启用，并逐条列明启用后会影响什么，
+**设置 → 树形任务流**：显示插件当前是启用还是未启用，并逐条列明启用后会影响什么，
 以及怎么开、怎么关。
 
 ## 命令
@@ -176,6 +177,8 @@ dsh plugin --profile web add dsh-task-tree
 |---|---|
 | `plans/<sessionId>.json` | 计划树（每个会话一棵） |
 | `surfaces/<sessionId>.json` | 三层的折叠游标 `{ key, cursor }` |
+
+> 目录名沿用插件改名前的标识，为的是不让既有的计划文件失联；插件名与它无关。
 
 计划属于建立它的那个会话。放到会话无关的位置，任何一个会话的计划都会被
 所有会话读到——那等于把不相干的节点指派塞进别人的上下文。
@@ -232,7 +235,7 @@ node verify-plan.mjs      # 计划树纯逻辑：状态流转、自动完成、�
 ## 卸载
 
 ```powershell
-dsh plugin --profile web remove dsh-task-tree
+dsh plugin --profile web remove dsh-tree-task-flow
 ```
 
 状态目录不会自动清理，需要的话手动删 `$DSH_HOME/dsh-task-tree`。

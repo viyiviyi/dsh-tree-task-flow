@@ -1,5 +1,5 @@
 /**
- * dsh-task-tree 的客户端：输入框上方的任务树条目 + 设置页里的插件开关说明。
+ * dsh-tree-task-flow 的客户端：输入框上方的任务树条目 + 设置页里的插件开关说明。
  *
  * 这是**手写**的模块包装格式（和 dsh-purge 的 client.js 一样），不经过打包，
  * 所以用 `h()` 而不是 JSX。
@@ -10,7 +10,7 @@
  *
  * 没有计划的会话**一个像素都不占**：读不到计划就返回 null，免得平白挤掉内置条目。
  *
- * 数据全部来自 host 端的 `/dsh-task-tree/*` 接口；条目本身不持有任何状态，
+ * 数据全部来自 host 端的 `/dsh-tree-task-flow/*` 接口；条目本身不持有任何状态，
  * 动作（完成 / 丢弃 / 停止 / 恢复 / 重置）都是 POST 回 host，由 host 改真正的文件。
  *
  * 面板只展示两样东西：**每个节点提交的结果**，以及**现在是不是停在检查点**。
@@ -20,7 +20,7 @@
  * 所以输入框的提示语要把这一点讲明白。
  */
 window.__ModuleLoader__.load({
-	id: "dsh-task-tree",
+	id: "dsh-tree-task-flow",
 	factory: (require) => {
 		var module = { exports: {} };
 		var exports = module.exports;
@@ -30,11 +30,11 @@ window.__ModuleLoader__.load({
 		const h = react.createElement;
 		const { useState, useEffect, useCallback } = react;
 
-		const name = "dsh-task-tree";
+		const name = "dsh-tree-task-flow";
 		const inject = ["slots", "locale"];
-		const NS = "dsh-task-tree";
+		const NS = "dsh-tree-task-flow";
 		/** 条目 id。用自己的 id，所以只会加在内置条目旁边。 */
-		const ENTRY_ID = "dsh-task-tree";
+		const ENTRY_ID = "dsh-tree-task-flow";
 
 		let translate = (key) => key;
 		const useT = () => translate;
@@ -77,7 +77,7 @@ window.__ModuleLoader__.load({
 		 * （比如完成时没给结果），所以这里要把 `ok` 也当错误判一次。
 		 */
 		async function post(body) {
-			const data = await api("/dsh-task-tree/action", {
+			const data = await api("/dsh-tree-task-flow/action", {
 				method: "POST",
 				headers: { "content-type": "application/json" },
 				body: JSON.stringify(body),
@@ -137,7 +137,7 @@ window.__ModuleLoader__.load({
 		// ---------------------------------------------------------------- 文案
 
 		const zh = {
-			nav: "任务树",
+			nav: "树形任务流",
 			"empty.title": "这个会话还没有计划",
 			"empty.hint": "让模型调用 tree_task_create 建立目标与任务，这里就会显示整棵树。",
 			"state.running": "进行中",
@@ -161,7 +161,7 @@ window.__ModuleLoader__.load({
 				"写清这个节点产出了什么。它整段执行过程会被这条结果顶替，所以要能独立看懂。",
 			"confirm.reset": "确定要清空这个会话的计划树吗？",
 			"confirm.drop": "确定要丢弃「{title}」吗？",
-			"settings.title": "任务树插件",
+			"settings.title": "树形任务流",
 			"settings.enabled": "已启用",
 			"settings.disabled": "未启用",
 			"settings.impact": "启用后它会做什么",
@@ -183,7 +183,7 @@ window.__ModuleLoader__.load({
 		};
 
 		const en = {
-			nav: "Task Tree",
+			nav: "Tree Task Flow",
 			"empty.title": "No plan in this session yet",
 			"empty.hint": "Ask the model to call tree_task_create to build a goal and tasks.",
 			"state.running": "In progress",
@@ -208,7 +208,7 @@ window.__ModuleLoader__.load({
 				"State what this node produced. Its whole execution range is replaced by this result, so it must stand on its own.",
 			"confirm.reset": "Clear this session's plan tree?",
 			"confirm.drop": "Drop “{title}”?",
-			"settings.title": "Task Tree plugin",
+			"settings.title": "Tree Task Flow",
 			"settings.enabled": "Enabled",
 			"settings.disabled": "Not enabled",
 			"settings.impact": "What it does once enabled",
@@ -730,7 +730,7 @@ window.__ModuleLoader__.load({
 					return;
 				}
 				try {
-					const data = await api("/dsh-task-tree/tree?sessionId=" + encodeURIComponent(sessionId));
+					const data = await api("/dsh-tree-task-flow/tree?sessionId=" + encodeURIComponent(sessionId));
 					setState({ loading: false, data });
 				} catch {
 					// 没有计划（404）是正常状态；真出错也不该占位。两种都当作"没有"。
@@ -798,7 +798,7 @@ window.__ModuleLoader__.load({
 			const [state, setState] = useState({ loading: true });
 
 			useEffect(() => {
-				api("/dsh-task-tree/sessions")
+				api("/dsh-tree-task-flow/sessions")
 					.then((data) => setState({ loading: false, data }))
 					.catch((error) => setState({ loading: false, error: String((error && error.message) || error) }));
 			}, []);
@@ -872,7 +872,7 @@ window.__ModuleLoader__.load({
 		// ---------------------------------------------------------------- 挂载
 
 		function apply(ctx) {
-			ctx.effect(() => ctx.locale.register(NS, { zh, en }), "dsh-task-tree: dictionaries");
+			ctx.effect(() => ctx.locale.register(NS, { zh, en }), "dsh-tree-task-flow: dictionaries");
 			translate = ctx.locale.bind(NS);
 
 			// 输入框上方的条目。list 槽 + 自己的 id ⇒ 只会并列加在内置
@@ -890,7 +890,7 @@ window.__ModuleLoader__.load({
 							TaskTreeDock,
 						),
 					),
-				"dsh-task-tree: conversation dock",
+				"dsh-tree-task-flow: conversation dock",
 			);
 
 			// 设置页：只显示状态与影响说明（启用与否由 profile 配置决定，运行时不改）。
@@ -909,7 +909,7 @@ window.__ModuleLoader__.load({
 							SettingsSection,
 						),
 					),
-				"dsh-task-tree: settings section",
+				"dsh-tree-task-flow: settings section",
 			);
 		}
 
