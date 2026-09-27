@@ -1,5 +1,5 @@
 /**
- * dsh-tree-task-flow 的客户端：输入框上方的树形任务流条目 + 设置页里的插件开关说明。
+ * dsh-tree-task-flow 的客户端：输入框上方的树形任务流条目。
  *
  * 这是**手写**的模块包装格式（和 dsh-purge 的 client.js 一样），不经过打包，
  * 所以用 `h()` 而不是 JSX。
@@ -161,25 +161,6 @@ window.__ModuleLoader__.load({
 				"写清这个节点产出了什么。它整段执行过程会被这条结果顶替，所以要能独立看懂。",
 			"confirm.reset": "确定要清空这个会话的计划树吗？",
 			"confirm.drop": "确定要丢弃「{title}」吗？",
-			"settings.title": "树形任务流",
-			"settings.enabled": "已启用",
-			"settings.disabled": "未启用",
-			"settings.impact": "启用后它会做什么",
-			"settings.impact.1": "在每个会话的系统提示词里加一段固定的工具组说明（会话内逐字节不变）。",
-			"settings.impact.2": "注册 6 个 tree_task_* 工具。",
-			"settings.impact.3":
-				"一个节点完成时，把它那一段执行过程从模型可见的上下文里折叠掉，换成一条携带提交结果的汇总消息。",
-			"settings.impact.4":
-				"一个节点的子节点全部结束时转入检查点：那一刻只放行 tree_task_plan 与 tree_task_done。",
-			"settings.impact.5":
-				"可选：模型停下来时自动续行（默认关闭；你按下停止后不会再被拉起来）。",
-			"settings.howto": "怎么开 / 怎么关",
-			"settings.howto.body":
-				"改 profile 的 cordis.patch.yml 里 task-tree 那一行的 config.enabled，然后重启 dsh web。装上不等于启用——默认是关的。",
-			"settings.stateDir": "状态目录",
-			"settings.sessions": "有计划的会话",
-			"settings.noSessions": "（还没有）",
-			"settings.checkpoint": "检查点",
 		};
 
 		const en = {
@@ -208,25 +189,6 @@ window.__ModuleLoader__.load({
 				"State what this node produced. Its whole execution range is replaced by this result, so it must stand on its own.",
 			"confirm.reset": "Clear this session's plan tree?",
 			"confirm.drop": "Drop “{title}”?",
-			"settings.title": "Tree Task Flow",
-			"settings.enabled": "Enabled",
-			"settings.disabled": "Not enabled",
-			"settings.impact": "What it does once enabled",
-			"settings.impact.1": "Adds one static tool-group section to every session's system prompt.",
-			"settings.impact.2": "Registers six tree_task_* tools.",
-			"settings.impact.3":
-				"When a node completes, folds its execution range out of the model-visible context and replaces it with one summary message carrying the submitted result.",
-			"settings.impact.4":
-				"When every child of a node finishes, the tree enters a checkpoint: only tree_task_plan and tree_task_done are allowed there.",
-			"settings.impact.5":
-				"Optional auto-continue when the model goes idle (off by default; never resumes after you stop it).",
-			"settings.howto": "How to enable / disable",
-			"settings.howto.body":
-				"Set config.enabled on the task-tree row in the profile's cordis.patch.yml, then restart dsh web. Installing is not enabling — it is off by default.",
-			"settings.stateDir": "State directory",
-			"settings.sessions": "Sessions with a plan",
-			"settings.noSessions": "(none yet)",
-			"settings.checkpoint": "checkpoint",
 		};
 
 		// ---------------------------------------------------------------- 样式
@@ -791,84 +753,6 @@ window.__ModuleLoader__.load({
 			);
 		}
 
-		// ---------------------------------------------------------------- 设置页
-
-		function SettingsSection() {
-			const t = useT();
-			const [state, setState] = useState({ loading: true });
-
-			useEffect(() => {
-				api("/dsh-tree-task-flow/sessions")
-					.then((data) => setState({ loading: false, data }))
-					.catch((error) => setState({ loading: false, error: String((error && error.message) || error) }));
-			}, []);
-
-			if (state.loading) return h("div", { style: S.wrap }, "…");
-			if (state.error) return h("div", { style: S.wrap }, h("div", { style: S.err }, state.error));
-
-			const enabled = state.data && state.data.enabled === true;
-			const sessions = (state.data && state.data.sessions) || [];
-
-			const row = (label, value) =>
-				h(
-					"div",
-					{ style: { display: "flex", gap: "8px", margin: "2px 0" } },
-					h("span", { style: { minWidth: "9em", opacity: 0.7 } }, label),
-					h("span", null, value),
-				);
-
-			return h(
-				"div",
-				{ style: S.wrap },
-				h("div", { style: { fontWeight: 600, marginBottom: "6px" } }, t("settings.title")),
-				row(
-					"",
-					h("span", { style: S.badge }, enabled ? t("settings.enabled") : t("settings.disabled")),
-				),
-				h("div", { style: { marginTop: "10px", fontWeight: 600 } }, t("settings.impact")),
-				h(
-					"ul",
-					{ style: { margin: "4px 0 10px 1.2em", padding: 0 } },
-					[
-						"settings.impact.1",
-						"settings.impact.2",
-						"settings.impact.3",
-						"settings.impact.4",
-						"settings.impact.5",
-					].map((key) => h("li", { key }, t(key))),
-				),
-				h("div", { style: { fontWeight: 600 } }, t("settings.howto")),
-				h("div", { style: S.hint }, t("settings.howto.body")),
-				h("div", { style: { marginTop: "10px", fontWeight: 600 } }, t("settings.stateDir")),
-				h("div", { style: S.meta }, "$DSH_HOME/dsh-task-tree/"),
-				h(
-					"div",
-					{ style: { marginTop: "10px", fontWeight: 600 } },
-					t("settings.sessions") + "：" + sessions.length,
-				),
-				sessions.length === 0
-					? h("div", { style: S.hint }, t("settings.noSessions"))
-					: h(
-							"div",
-							{ style: S.child },
-							sessions.map((item) =>
-								h(
-									"div",
-									{ key: item.sessionId, style: S.meta },
-									item.goal +
-										" · " +
-										item.done +
-										"/" +
-										item.steps +
-										(item.checkpoint ? " · " + t("settings.checkpoint") : "") +
-										" · " +
-										item.sessionId,
-								),
-							),
-						),
-			);
-		}
-
 		// ---------------------------------------------------------------- 挂载
 
 		function apply(ctx) {
@@ -891,25 +775,6 @@ window.__ModuleLoader__.load({
 						),
 					),
 				"dsh-tree-task-flow: conversation dock",
-			);
-
-			// 设置页：只显示状态与影响说明（启用与否由 profile 配置决定，运行时不改）。
-			ctx.effect(
-				() =>
-					ctx.slots.inject("settings.section", () =>
-						ctx.slots.register(
-							{
-								name: "settings.section",
-								id: ENTRY_ID,
-								order: 45,
-								label: () => translate("nav"),
-								locale: NS,
-								inject: () => ({}),
-							},
-							SettingsSection,
-						),
-					),
-				"dsh-tree-task-flow: settings section",
 			);
 		}
 

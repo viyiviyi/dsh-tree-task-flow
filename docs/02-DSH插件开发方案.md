@@ -262,10 +262,11 @@ import 任何 `@deepseek-ai/*` 运行时模块都会在加载时直接炸掉。
 并在节点完成时改上下文——这种事不该在用户没点头的时候发生。
 
 未启用时注册路径刻意收窄：不注册工具、不加提示词段落、不挂 `agent/pre-step`、
-不挂检查点闸门。只注册两条**只读**入口，让人能确认"装了但没开"以及怎么开：
+不挂检查点闸门。只留两样东西：
 
-- `/task-tree` 命令（返回未启用说明）
-- 面板 HTTP 接口（设置页要能显示启用后的影响）
+- `/task-tree` 命令——返回"装了但没开"以及怎么开
+- 条目 HTTP 接口——客户端条目与 `enabled` 无关，照样会来读；读不到计划就返回
+  404，条目据此**一个像素都不占**。既有计划文件也因此仍然可查
 
 ### 9.2 斜杠命令
 
@@ -295,10 +296,12 @@ margin:       0 auto
 所以 `max-width` 正好等于 `chat-content-width`——**与消息正文同宽**。
 `chat-content-width` 从会话列宽动态算出，窗口缩放时会跟着正文一起变。
 
-### 9.4 设置页
+**没有计划的会话一个像素都不占。** 读不到计划（404）就返回 `null`，不占位、
+不挤掉内置的待办与目标条目。
 
-注册到 `settings.section`，显示插件当前是启用还是未启用，并逐条列明启用后会影响什么，
-以及怎么开、怎么关。
+开关不放界面上：它是启动期配置，改了要重启 `dsh web` 才生效，做成运行时开关
+只会给人"点了就变"的错觉。真正的开关是 profile `cordis.patch.yml` 里那一行的
+`config.enabled`。
 
 ---
 
@@ -327,7 +330,7 @@ dsh-tree-task-flow/
 ├─ package.json          dsh.bundle.patch / dsh.client 声明
 ├─ cordis.patch.yml      bundle 层：把 task-tree 这一行插进 profile
 ├─ enable.example.yml    启用示例
-├─ client.js             前端：任务树条目 + 设置段
+├─ client.js             前端：输入框上方的任务树条目
 ├─ lib/
 │  ├─ index.js           入口：配置兜底、启用/未启用两条装配路径
 │  ├─ plan.js            计划树纯逻辑：状态流转、activePath、checkpointOf、渲染
@@ -336,7 +339,7 @@ dsh-tree-task-flow/
 │  ├─ tools.js           六个工具 + 检查点闸门
 │  ├─ prompt.js          静态系统提示词段落
 │  ├─ commands.js        /task-tree 命令
-│  ├─ http.js            面板与设置页的 HTTP 接口
+│  ├─ http.js            条目的 HTTP 接口
 │  └─ auto-continue.js   自动续行兜底
 ├─ verify-*.mjs          自检（不随包发布，见 files 白名单）
 └─ docs/                 设计文档
