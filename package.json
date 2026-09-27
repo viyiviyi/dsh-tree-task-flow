@@ -1,0 +1,64 @@
+{
+  "name": "dsh-task-tree",
+  "version": "0.1.0",
+  "description": "三级任务树：节点完成时由 AI 提交结果，插件随即把该节点的执行过程从上下文里折叠掉，只留下结果。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "client.js",
+    "cordis.patch.yml",
+    "enable.example.yml",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-sidebar-right",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "license": "MIT",
+  "author": "viyiviyi",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/viyiviyi/dsh-task-tree.git"
+  },
+  "homepage": "https://github.com/viyiviyi/dsh-task-tree#readme",
+  "bugs": {
+    "url": "https://github.com/viyiviyi/dsh-task-tree/issues"
+  },
+  "keywords": [
+    "deepseek",
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "cordis",
+    "plan",
+    "task-tree"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.0 <5"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  }
+}

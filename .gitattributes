@@ -1,0 +1,9 @@
+# 统一按 LF 存储与检出：插件里全是文本文件，Windows 上默认的 CRLF 转换
+# 会在每次提交时制造无意义的整文件差异。
+* text=auto eol=lf
+
+# 二进制文件不做行尾处理。
+*.png binary
+*.jpg binary
+*.ico binary
+*.tgz binary

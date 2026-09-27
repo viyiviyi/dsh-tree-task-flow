@@ -1,0 +1,20 @@
+# 本插件的 bundle 配置层：把 task-tree 这一行插入 profile 的插件行列表。
+#
+# package.json 的 dsh.bundle.patch 指向本文件，因此安装成 bundle 后，
+# 这一层会自动挂进 `dsh.profile.bundles` 配置栈（优先级低于 profile 自身的
+# cordis.patch.yml）。
+#
+# 这里刻意不写 config，全部走 lib/index.js 里的 DEFAULT_CONFIG。
+# 要临时关掉或改默认值，请在 profile 自己的 cordis.patch.yml 里覆盖这一行。
+#
+# ⚠️ 同 id 的 config 是**整体替换**，不是逐字段深合并——覆盖时要把需要的
+#    字段一次写全。可覆盖的字段见 DEFAULT_CONFIG：
+#
+#   enabled            总开关                          默认 false（装上 ≠ 启用）
+#   autoContinue       是否允许自动续行                默认 false（开着会让人停不下来）
+#   maxAutoRounds      连续自动续行轮次上限            默认 5
+#   promptOrder        静态说明段顺序                  默认 2000
+#   rootDir            插件状态目录                    默认 $DSH_HOME/dsh-task-tree
+- insert:
+    - id: task-tree
+      name: 'dsh-task-tree'

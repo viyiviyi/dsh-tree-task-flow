@@ -1,0 +1,15 @@
+# 依赖（本插件没有运行时依赖，装上也不会有；防的是本地手滑装出来的）
+node_modules/
+
+# npm pack / pnpm pack 的产物
+*.tgz
+
+# 日志与临时文件
+*.log
+*.tmp
+
+# 编辑器与系统
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
