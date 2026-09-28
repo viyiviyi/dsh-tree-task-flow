@@ -1,0 +1,27 @@
+# 这个文件只是示例，插件不需要它——**安装即启用**，装完就能用。
+#
+# 想改默认值时，把下面这段抄进 profile 自己的 cordis.patch.yml
+# （通常是 $DSH_HOME/profiles/<名字>/cordis.patch.yml）：
+#
+#   - id: task-tree
+#     config:
+#       enabled: false
+#
+# ⚠️ 同 id 的 config 是**整体替换**，不是逐字段深合并：写进去的字段会一次性顶掉
+#    整份默认配置，没写的字段回落到 `lib/index.js` 的 DEFAULT_CONFIG。所以要改
+#    哪一项就把想保留的项一起写全。
+- id: task-tree
+  config:
+    # 总开关。默认 true（装上即启用）；写 false 就一句话关掉，
+    # 关掉后插件不注册工具、不加提示词、不折叠上下文、不续行，一个字节都不碰会话。
+    enabled: true
+    # 模型停下时是否自动续行。默认 false —— 开着意味着 agent 一空下来就被再推一把，
+    # 会出现「按下停止却停不下来」，所以它从不默认打开。
+    autoContinue: false
+    # 连续自动续行的轮次上限，达到就停；只有真人发言才重置配额。
+    maxAutoRounds: 5
+    # 工具说明段落的排序。1800 落在内置的 TOOL_PTY(1700) 与 TOOL_WEB_SEARCH(2000)
+    # 之间的空档，不与任何内置段落撞号。
+    promptOrder: 1800
+    # 插件状态目录；null 表示 $DSH_HOME/dsh-task-tree。
+    rootDir: null

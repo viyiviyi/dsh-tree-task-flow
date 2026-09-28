@@ -4,7 +4,8 @@
 **目标 → 任务 → 子任务**三级树，每个节点完成时由模型提交结果，插件随即把这个节点的
 **执行过程**从上下文里折叠掉，只留下那条结果。
 
-装上不等于启用。插件默认关闭，不会在没人点头的时候改动任何会话。
+**安装即启用**：`dsh plugin add` 之后就生效，不需要再改任何配置。
+不想用的时候，在 profile 里写一句 `enabled: false` 就能关掉，关掉后一个字节都不碰会话。
 
 ## 它解决什么
 
@@ -81,41 +82,47 @@
 
 需要 Node.js 22.19 以上，以及能运行 `dsh`。
 
-**从源码目录安装**（装成 `link:`，改完源码重启即生效）。把仓库克隆到任意目录，
-然后指向那个目录：
-
-```powershell
-dsh plugin --profile web add <插件目录>
-dsh --profile web --dump-config          # 输出里应出现 task-tree 这一行
-```
-
 **从 npm 安装**：
 
 ```powershell
 dsh plugin --profile web add dsh-tree-task-flow
 ```
 
-**装完必须重启 `dsh web`**——运行中的会话不追溯。
+**从源码目录安装**（装成 `link:`，改完源码重启即生效）。把仓库克隆到任意目录，
+然后指向那个目录：
 
-## 启用
+```powershell
+dsh plugin --profile web add <插件目录>
+```
 
-**装上 ≠ 启用，插件默认是关的**（`enabled: false`）。
+`dsh plugin add` 会把包加进 profile 的 `dsh.profile.bundles`，而本包自带的
+`cordis.patch.yml`（由 `package.json` 的 `dsh.bundle.patch` 指定）会顺势把
+`task-tree` 这一行插进插件列表——**装上即启用，不需要再改任何配置**。装完可以核对：
 
-在 `$DSH_HOME/profiles/web/cordis.patch.yml` 里加：
+```powershell
+dsh --profile web --dump-config          # 输出里应出现 task-tree 这一行，且不带 config
+```
+
+**必须重启 `dsh web` 才生效**——运行中的会话不追溯，新工具要在新会话里才会出现。
+
+## 关闭
+
+不想要了，除了 `dsh plugin remove` 卸掉，也可以只把它关掉。在
+`$DSH_HOME/profiles/<名字>/cordis.patch.yml` 里写：
 
 ```yaml
 - id: task-tree
   config:
-    enabled: true
+    enabled: false
 ```
 
-然后重启 `dsh web`。仓库里的 `enable.example.yml` 可以直接抄。
+然后重启 `dsh web`。仓库里的 `config.example.yml` 有可以直接抄的完整版本。
 
 > ⚠️ profile 这一层按行覆盖时 `config` 是**整体替换**，不是逐字段深合并——
 > 覆盖时要把想保留的字段一起写全，没写的会走插件默认值（见下面的配置表）。
 
-没启用时插件**一个字节都不碰会话**：不注册工具、不加提示词段落、不折叠、不续行、
-不挂暂停闸门。只留一条 `/task-tree` 命令让你确认"装了但没开"以及怎么开。
+关掉之后插件**一个字节都不碰会话**：不注册工具、不加提示词段落、不折叠、不续行、
+不挂暂停闸门。只留一条 `/task-tree` 命令，让你确认它是被关掉的以及怎么打开。
 
 ## 界面
 
@@ -137,7 +144,7 @@ dsh plugin --profile web add dsh-tree-task-flow
 **没有计划的会话一个像素都不占**——读不到计划就返回 `null`，不会平白挤掉内置的
 待办与目标条目。
 
-开关不在界面上，在 profile 的 `cordis.patch.yml` 里（见下面的「启用」一节）。
+开关不在界面上，在 profile 的 `cordis.patch.yml` 里（见上面的「关闭」一节）。
 
 ## 命令
 
@@ -158,7 +165,7 @@ dsh plugin --profile web add dsh-tree-task-flow
 
 | 字段 | 默认 | 说明 |
 |---|---|---|
-| `enabled` | `false` | 总开关 |
+| `enabled` | `true` | 总开关；**装上即启用**，写 `false` 关掉 |
 | `autoContinue` | `false` | 模型停下时是否自动续行 |
 | `maxAutoRounds` | `5` | 连续自动续行的轮次上限 |
 | `promptOrder` | `1800` | 工具说明段落的排序 |
@@ -263,7 +270,7 @@ dsh plugin --profile web add dsh-tree-task-flow
 真去物化 `client.js`、真调一次 `apply`、真渲染一遍条目。
 
 ```powershell
-node verify-entry.mjs     # 入口装配：启用/未启用两条路径各注册了什么
+node verify-entry.mjs     # 入口装配：默认（安装即启用）/ 显式关闭两条路径各注册了什么
 node verify-tools.mjs     # 工具层：schema、result 必填、三级约束
 node verify-region.mjs    # 折叠行为：游标推进、降级追加、检查点提示
 node verify-plan.mjs      # 计划树纯逻辑：状态流转、自动完成、丢弃级联

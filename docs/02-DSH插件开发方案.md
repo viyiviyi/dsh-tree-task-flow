@@ -267,15 +267,16 @@ import 任何 `@deepseek-ai/*` 运行时模块都会在加载时直接炸掉。
 
 ## 9. 开关、界面与暂停
 
-### 9.1 默认不启用
+### 9.1 安装即启用
 
-`enabled` 默认 `false`。一启用，插件就会往**每个会话**的系统提示词里加一段说明、
-并在节点完成时改上下文——这种事不该在用户没点头的时候发生。
+`enabled` 默认 `true`。安装插件这个动作本身就是用户点的头，再让每个人去改一遍 profile
+配置没有道理；`dsh plugin add` 会把包加进 `dsh.profile.bundles`，包自带的
+`cordis.patch.yml` 顺势插入 `task-tree` 行，装上就生效。
 
-未启用时注册路径刻意收窄：不注册工具、不加提示词段落、不挂 `agent/pre-step`。
-只留两样东西：
+不想用时写一句 `enabled: false` 关掉。关闭时注册路径刻意收窄：不注册工具、不加提示词
+段落、不挂 `agent/pre-step`。只留两样东西：
 
-- `/task-tree` 命令——返回"装了但没开"以及怎么开
+- `/task-tree` 命令——返回"已被配置关闭"以及怎么打开
 - 条目 HTTP 接口——客户端条目与 `enabled` 无关，照样会来读；读不到计划就返回
   404，条目据此**一个像素都不占**。既有计划文件也因此仍然可查
 
@@ -400,10 +401,10 @@ margin:       0 auto
 dsh-tree-task-flow/
 ├─ package.json          dsh.bundle.patch / dsh.client 声明
 ├─ cordis.patch.yml      bundle 层：把 task-tree 这一行插进 profile
-├─ enable.example.yml    启用示例
+├─ config.example.yml    配置示例（安装即启用，此文件非必需）
 ├─ client.js             前端：输入框上方的任务树条目
 ├─ lib/
-│  ├─ index.js           入口：配置兜底、启用/未启用两条装配路径
+│  ├─ index.js           入口：配置兜底、默认启用/显式关闭两条装配路径
 │  ├─ plan.js            计划树纯逻辑：状态流转、activePath、checkpointOf、渲染
 │  ├─ store.js           状态读写：plans/ 与 surfaces/，原子写
 │  ├─ region.js          折叠：游标同步、折叠范围、汇总消息
@@ -465,7 +466,7 @@ dsh-tree-task-flow/
 
 | 脚本 | 覆盖 |
 |---|---|
-| `verify-entry.mjs` | 启用/未启用两条装配路径各注册了什么；工具数、提示词段数与作用域解析；确认不挂任何工具拦截 |
+| `verify-entry.mjs` | 默认（安装即启用）/ 显式关闭两条装配路径各注册了什么；工具数、提示词段数与作用域解析；确认不挂任何工具拦截 |
 | `verify-tools.mjs` | 六个工具的 schema；`result` 必填；三级约束 |
 | `verify-region.mjs` | 游标推进；同级汇总不被卷走；游标失效时降级追加；检查点提示随汇总落下 |
 | `verify-plan.mjs` | 状态流转；连续结束合进一条汇总；自动完成与丢弃级联；渲染不抛错 |

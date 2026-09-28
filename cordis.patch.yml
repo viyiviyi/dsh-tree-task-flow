@@ -2,15 +2,16 @@
 #
 # package.json 的 dsh.bundle.patch 指向本文件，因此安装成 bundle 后，
 # 这一层会自动挂进 `dsh.profile.bundles` 配置栈（优先级低于 profile 自身的
-# cordis.patch.yml）。
+# cordis.patch.yml）。安装这个动作本身就把插件行插好了——**装上即启用**，
+# 不需要再改任何配置。
 #
-# 这里刻意不写 config，全部走 lib/index.js 里的 DEFAULT_CONFIG。
+# 这里刻意不写 config，全部走 lib/index.js 里的 DEFAULT_CONFIG（enabled 默认 true）。
 # 要临时关掉或改默认值，请在 profile 自己的 cordis.patch.yml 里覆盖这一行。
 #
 # ⚠️ 同 id 的 config 是**整体替换**，不是逐字段深合并——覆盖时要把需要的
 #    字段一次写全。可覆盖的字段见 DEFAULT_CONFIG：
 #
-#   enabled            总开关                          默认 false（装上 ≠ 启用）
+#   enabled            总开关                          默认 true（写 false 关掉）
 #   autoContinue       是否允许自动续行                默认 false（开着会让人停不下来）
 #   maxAutoRounds      连续自动续行轮次上限            默认 5
 #   promptOrder        工具说明段顺序                  默认 1800

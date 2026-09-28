@@ -10,7 +10,8 @@
  *   3. 提示词**只有一段**——注册的 `text` 是个按作用域解析的函数：工具在作用域里
  *      就输出正文常量，不在就输出空串；正文里不再重复工具清单。
  *
- * 另外核对未启用态：一个工具、一段提示词都不注册，只留命令与面板接口。
+ * 另外核对默认态与关闭态：不给 config 时按"安装即启用"注册全部东西；
+ * 显式 `enabled: false` 时一个工具、一段提示词都不注册，只留命令与面板接口。
  *
  * 假 ctx 只实现 `apply` 装配路径真正用到的那几样：`effect` / `systemPrompt.section`
  * / `tools.register` / `on` / `get` / `inject` / `logger`。
@@ -271,23 +272,60 @@ check(
   Object.keys(DEFAULT_CONFIG).join(", "),
 );
 check(
-  "enable 示例文件里也没有资料开关",
+  "config 示例文件里也没有资料开关",
   !/resource|injectResources|reloadOnCompaction|cutOnStepDone/iu.test(
-    readFileSync(join(HERE, "enable.example.yml"), "utf8"),
+    readFileSync(join(HERE, "config.example.yml"), "utf8"),
   ),
 );
+check(
+  "bundles 的 patch 不写 config（安装即启用走的是 DEFAULT_CONFIG）",
+  !/^\s*config:/mu.test(readFileSync(join(HERE, "cordis.patch.yml"), "utf8")),
+);
 
-// ---------------------------------------------------------------- 未启用态
+// ---------------------------------------------------------------- 默认态
 
-console.log("\n未启用态：");
+console.log("\n默认态（安装即启用，不给 config）：");
+check("enabled 默认是 true", DEFAULT_CONFIG.enabled === true, String(DEFAULT_CONFIG.enabled));
+
+// 用户装完不做任何配置，走的就是这条路。它必须和显式 enabled:true 等价，
+// 否则"安装即启用"就只是 README 里的一句话。
+const bare = makeHarness();
+apply(bare.ctx);
+check(
+  "不给 config 也注册六个工具",
+  bare.tools.map((tool) => tool.name).sort().join(", ") === SIX_TOOLS.slice().sort().join(", "),
+  bare.tools.map((tool) => tool.name).join(", "),
+);
+check("不给 config 也加一段提示词", bare.sections.length === 1, String(bare.sections.length));
+check(
+  "不给 config 也挂 pre-step（折叠 + 续行 + 暂停闸门）",
+  (bare.handlers.get("agent/pre-step") ?? []).length === 3,
+  String((bare.handlers.get("agent/pre-step") ?? []).length),
+);
+check("不给 config 也挂了停止信号监听", bare.handlers.has("agent/turn-stopping"));
+check(
+  "不给 config 也会打印启用日志",
+  bare.logs.some((line) => line.includes("已启用")),
+  bare.logs.join(" | "),
+);
+check("rootDir 默认是 null（落到 $DSH_HOME）", DEFAULT_CONFIG.rootDir === null);
+
+// ---------------------------------------------------------------- 关闭态
+
+console.log("\n关闭态（显式 enabled: false）：");
 const off = makeHarness();
 apply(off.ctx, { enabled: false, rootDir: stateRoot() });
 
 check("一个工具都不注册", off.tools.length === 0, String(off.tools.length));
 check("一段提示词都不注册", off.sections.length === 0, String(off.sections.length));
 check("不挂 pre-step", !off.handlers.has("agent/pre-step"));
-check("未启用态同样不拦任何工具", !off.handlers.has("tools/pre-execute"));
+check("关闭态同样不拦任何工具", !off.handlers.has("tools/pre-execute"));
 check("面板接口照挂", off.injected.length > 0, JSON.stringify(off.injected));
+check(
+  "日志说明是被配置关掉的",
+  off.logs.some((line) => line.includes("已按配置关闭")),
+  off.logs.join(" | "),
+);
 
 // ---------------------------------------------------------------- 汇总
 

@@ -1,4 +1,0 @@
-# 显式启用插件用。默认 enabled 是 false——装上不等于启用。
-- id: task-tree
-  config:
-    enabled: true
