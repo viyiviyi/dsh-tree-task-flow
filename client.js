@@ -187,6 +187,23 @@ window.__ModuleLoader__.load({
 			);
 		}
 
+		/**
+		 * 面板一打开该摊开哪些节点：活动路径上的三层，加上检查点节点以及它的祖先。
+		 *
+		 * 其余节点一律收起——正在走的那条路径本来就窄，摊平整棵树只会让人翻半天。
+		 * 检查点落在某个任务上时，目标也得一起摊开，否则连那一行都看不见。
+		 */
+		function defaultOpenIds(data) {
+			const ids = currentIds(data);
+			const checkpoint = data.checkpoint;
+			if (checkpoint !== null && checkpoint !== undefined && typeof checkpoint.id === "string") {
+				ids.add(checkpoint.id);
+				const goalId = data.plan?.goal?.id;
+				if (checkpoint.level !== "goal" && typeof goalId === "string") ids.add(goalId);
+			}
+			return ids;
+		}
+
 		// ---------------------------------------------------------------- 文案
 
 		const zh = {
@@ -297,6 +314,10 @@ window.__ModuleLoader__.load({
 			".dsh-ttf-markCell{flex:none;display:inline-flex;align-items:center;margin-top:3px;color:var(--dsw-alias-label-tertiary)}",
 			".dsh-ttf-markDone{flex:none;display:inline-flex;align-items:center;margin-top:3px;color:var(--dsw-alias-state-success-primary,#1a7f37)}",
 			".dsh-ttf-markMuted{flex:none;display:inline-flex;align-items:center;margin-top:3px;color:var(--dsw-alias-label-caption,#00000066)}",
+			// 正在运行的标记：就是原来那个虚线圆，让它匀速转起来。1s 一圈、线性、
+			// 无限，与内置待办面板 in_progress 的节奏一致。
+			"@keyframes dsh-ttf-spin{to{transform:rotate(360deg)}}",
+			".dsh-ttf-markSpin{animation:dsh-ttf-spin 1s linear infinite;transform-origin:50% 50%}",
 			".dsh-ttf-done{color:var(--dsw-alias-label-tertiary);text-decoration:line-through}",
 			// 三层缩进。
 			// 子节点：一条竖线 + 每个子节点一个拐角，把三层画成看得见的树。
@@ -340,7 +361,11 @@ window.__ModuleLoader__.load({
 
 		// ---------------------------------------------------------------- 零件
 
-		/** 节点状态标记：完成打勾、丢弃划掉、未完成画圈（当前节点用虚线圈，和内置待办一致）。 */
+		/**
+		 * 节点状态标记：完成打勾、丢弃划掉、未完成画圈（当前节点用虚线圈，和内置待办一致）。
+		 *
+		 * 正在运行的那个圈还会匀速转起来——虚线一转就能看出这条路径还在推进。
+		 */
 		function StatusMark({ node, isCurrent }) {
 			if (node.status === "done") {
 				const check = icon("IconCheckOutline14", 14);
@@ -357,7 +382,14 @@ window.__ModuleLoader__.load({
 				{ className: "dsh-ttf-markCell" },
 				h(
 					"svg",
-					{ width: 14, height: 14, viewBox: "0 0 14 14", fill: "none", "aria-hidden": true },
+					{
+						width: 14,
+						height: 14,
+						viewBox: "0 0 14 14",
+						fill: "none",
+						"aria-hidden": true,
+						className: isCurrent ? "dsh-ttf-markSpin" : undefined,
+					},
 					h("circle", circle),
 				),
 			);
@@ -428,11 +460,25 @@ window.__ModuleLoader__.load({
 		 * 三层共用同一个组件——它们的字段与动作本来就一样，差别只有缩进和
 		 * 「能不能丢弃」（整个目标不能丢，plan.js 会拒绝）。
 		 */
-		function NodeRow({ node, depth, activeIds, checkpointId, canDrop, sessionId, reload, t, defaultOpen }) {
-			const [open, setOpen] = useState(defaultOpen === true);
+		function NodeRow({ node, depth, activeIds, openIds, checkpointId, canDrop, sessionId, reload, t }) {
+			const children = node.tasks || node.steps || [];
+			const canAct = node.status === "pending";
+			const isCurrent = activeIds.has(node.id);
+			const isCheckpoint = checkpointId === node.id;
+			const shouldOpen = openIds.has(node.id);
+			const expandable = children.length > 0 || node.detail !== undefined || node.result !== undefined;
+
+			// 默认只摊开"正在走的那条路径"（见 defaultOpenIds）：目标一路展开到当前子任务，
+			// 其余节点收起。否则一打开面板就是一整棵摊平的树，想找正在跑的那个得翻半天。
+			const [open, setOpen] = useState(shouldOpen);
 			const [composing, setComposing] = useState(false);
 			const [busy, setBusy] = useState(false);
 			const [error, setError] = useState(null);
+
+			// 活动节点在会话里往前走了，就把它摊开：当前任务不该埋在收起里。
+			useEffect(() => {
+				if (shouldOpen) setOpen(true);
+			}, [shouldOpen]);
 
 			const act = useCallback(
 				async (body) => {
@@ -450,12 +496,6 @@ window.__ModuleLoader__.load({
 				},
 				[sessionId, reload],
 			);
-
-			const children = node.tasks || node.steps || [];
-			const canAct = node.status === "pending";
-			const isCurrent = activeIds.has(node.id);
-			const isCheckpoint = checkpointId === node.id;
-			const expandable = children.length > 0 || node.detail !== undefined || node.result !== undefined;
 
 			return h(
 				"div",
@@ -545,14 +585,12 @@ window.__ModuleLoader__.load({
 									node: child,
 									depth: depth + 1,
 									activeIds,
+									openIds,
 									checkpointId,
 									canDrop: true,
 									sessionId,
 									reload,
 									t,
-									// 条目一展开就该看见整棵树，所以每一层都摊开；
-									// 嫌长的用上面的「收起」逐层折。
-									defaultOpen: true,
 								}),
 							),
 							children.length === 0 && depth < 2
@@ -701,14 +739,13 @@ window.__ModuleLoader__.load({
 									node: goal,
 									depth: 0,
 									activeIds: currentIds(data),
+									openIds: defaultOpenIds(data),
 									checkpointId: data.checkpoint ? data.checkpoint.id : null,
 									// 整个目标不能丢弃：plan.js 会拒绝，这里也不给按钮。
 									canDrop: false,
 									sessionId,
 									reload,
 									t,
-									// 展开条目就是为了看树，所以第一层默认摊开。
-									defaultOpen: true,
 								}),
 							)
 						: null,

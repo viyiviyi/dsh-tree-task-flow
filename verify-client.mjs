@@ -14,8 +14,8 @@
  *      正文含条目外壳、单行条、图标按钮、展开体这些关键类。
  *   4. 文案：zh / en 键集一致，渲染过程中没有取到不存在的键。
  *   5. 渲染：折叠态是单行条（状态标签 + 目标标题 + 进度 + 暂停/继续、
- *      清空、展开三个图标按钮，没有展开体）；展开态出展开体与整棵树；
- *      暂停态状态标签变「已暂停」、按钮变「继续」、并给出暂停说明。
+ *      清空、展开三个图标按钮，没有展开体）；展开态出展开体，且只摊开正在走的
+ *      那条路径；暂停态状态标签变「已暂停」、按钮变「继续」、并给出暂停说明。
  *
  * 假 react 不实现真实的 hook 语义：`TaskTreeDock` 的三个 `useState` 初值由
  * 用例直接注入（`dockPreset`），`useEffect` 不执行——所以渲染不碰 fetch。
@@ -368,7 +368,8 @@ const DATA = {
       ],
     },
   },
-  active: { goalId: "g1", taskId: "t1", stepId: null },
+  // 渲染单测：把当前项指到最深一层，好一次看见整条活动路径。
+  active: { goalId: "g1", taskId: "t1", stepId: "x1" },
   checkpoint: null,
   stopped: false,
   paused: false,
@@ -428,6 +429,75 @@ check(
   resultBlocks.some((node) => classOf(node).includes("dsh-ttf-resultClick")),
 );
 
+console.log("\n正在运行的标记：");
+const running = findAll(expanded, (node) => classOf(node).includes("dsh-ttf-markSpin"));
+check("活动路径上的节点画出转圈标记", running.length === 2, String(running.length));
+check(
+  "转的还是原来那个虚线圆（外观没变，只是加转动）",
+  running.every(
+    (node) =>
+      findAll(node, (child) => child.type === "circle").length === 1 &&
+      findAll(node, (child) => child.type === "circle")[0].props.strokeDasharray === "2.4 2.4",
+  ),
+);
+check(
+  "转圈标记外面还是原来的标记格（颜色和尺寸都没动）",
+  findAll(expanded, (node) => classOf(node).includes("dsh-ttf-markCell")).length === 2,
+  String(findAll(expanded, (node) => classOf(node).includes("dsh-ttf-markCell")).length),
+);
+
+const idle = renderDock(Object.assign({}, DATA, { active: null }), true);
+check(
+  "没有活动节点时一个都不转",
+  findAll(idle, (node) => classOf(node).includes("dsh-ttf-markSpin")).length === 0,
+);
+check(
+  "没有活动节点时整棵树默认收起（只留目标那一行）",
+  !hasText(idle, "任务一") && !hasText(idle, "子任务一"),
+);
+check(
+  "收起的节点仍是待办圈",
+  findAll(idle, (node) => classOf(node).includes("dsh-ttf-markCell")).length === 1,
+  String(findAll(idle, (node) => classOf(node).includes("dsh-ttf-markCell")).length),
+);
+
+console.log("\n默认只摊开正在走的那条路径：");
+const TWO = {
+  ok: true,
+  plan: {
+    sessionId: "s1",
+    goal: {
+      id: "g1",
+      title: "示例目标",
+      status: "pending",
+      tasks: [
+        { id: "t1", title: "任务一", status: "done", steps: [{ id: "x1", title: "子任务一", status: "done" }] },
+        { id: "t2", title: "任务二", status: "pending", steps: [{ id: "x2", title: "子任务二", status: "pending" }] },
+      ],
+    },
+  },
+  active: { goalId: "g1", taskId: "t2", stepId: "x2" },
+  checkpoint: null,
+  stopped: false,
+  paused: false,
+};
+const two = renderDock(TWO, true);
+check("目标展开，两条任务都看得见", hasText(two, "任务一") && hasText(two, "任务二"));
+check("当前任务展开，看得见正在跑的子任务", hasText(two, "子任务二"));
+check("已经收尾的任务默认收起，不画它的子节点", !hasText(two, "子任务一"));
+
+const checkpointed = renderDock(
+  Object.assign({}, TWO, {
+    active: null,
+    checkpoint: { id: "t1", level: "task", label: "任务", title: "任务一" },
+  }),
+  true,
+);
+check(
+  "检查点所在的任务默认展开（不用人自己去翻）",
+  hasText(checkpointed, "子任务一") && !hasText(checkpointed, "子任务二"),
+);
+
 console.log("\n外观约定（树形、分界、标题、结果）：");
 check("同一层的节点之间有分界线", SOURCE.includes(".dsh-ttf-node+.dsh-ttf-node{"));
 check("详情里的内容块之间有分界线", SOURCE.includes(".dsh-ttf-detail>*+*{"));
@@ -443,6 +513,11 @@ check(
     !/\.dsh-ttf-rowTitle\{[^}]*text-overflow/u.test(SOURCE),
 );
 check("结果默认只占一行（行数钳到 1）", SOURCE.includes("-webkit-line-clamp:1"));
+check(
+  "转圈靠 CSS 关键帧（1s 匀速、无限，与内置待办面板同款）",
+  SOURCE.includes("@keyframes dsh-ttf-spin{to{transform:rotate(360deg)}}") &&
+    SOURCE.includes("animation:dsh-ttf-spin 1s linear infinite"),
+);
 check("点开后取消钳制，看全文", SOURCE.includes(".dsh-ttf-resultOpen{display:block"));
 check(
   "旧写法已经清干净（pre 呈现、三层 padding 缩进）",
