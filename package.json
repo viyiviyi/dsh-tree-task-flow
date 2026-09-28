@@ -1,6 +1,6 @@
 {
   "name": "dsh-tree-task-flow",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "树形任务流：把多步任务组织成目标→任务→子任务三级树，节点完成时由 AI 提交结果，插件随即把该节点的执行过程从上下文里折叠掉，只留下结果。",
   "type": "module",
   "main": "lib/index.js",
