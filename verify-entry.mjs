@@ -7,8 +7,8 @@
  *   2. 资料层已经不存在：`lib/resource.js` 没了，也没有任何模块还引用它、
  *      或残留 `registerResourceCapture` / `injectResources` / `pickResources` 之类的符号；
  *      配置项里也没有资料相关的开关。
- *   3. 提示词**只有一段、静态**——注册的正文是常量字符串本身，文本里不含
- *      `needs` 与记忆相关的说法；两次装配得到逐字节相同的一段。
+ *   3. 提示词**只有一段**——注册的 `text` 是个按作用域解析的函数：工具在作用域里
+ *      就输出正文常量，不在就输出空串；正文里不再重复工具清单。
  *
  * 另外核对未启用态：一个工具、一段提示词都不注册，只留命令与面板接口。
  *
@@ -76,6 +76,9 @@ function makeHarness() {
     tools: {
       register(def) {
         tools.push(def);
+      },
+      get(toolName) {
+        return tools.find((tool) => tool.name === toolName);
       },
     },
     on(event, handler) {
@@ -153,10 +156,25 @@ console.log("\n提示词段落：");
 check("只注册了一段", on.sections.length === 1, String(on.sections.length));
 check("段落名固定", on.sections[0]?.name === SECTION_NAME, String(on.sections[0]?.name));
 check("段落排序固定", on.sections[0]?.order === DEFAULT_ORDER, String(on.sections[0]?.order));
+check("正文是按作用域解析的函数", typeof on.sections[0]?.text === "function");
 check(
-  "正文是常量字符串本身（静态）",
-  typeof on.sections[0]?.text === "string" && on.sections[0].text === SECTION_TEXT,
+  "工具在作用域里时输出正文常量",
+  on.sections[0]?.text({ scope: undefined }) === SECTION_TEXT,
 );
+
+// 工具不在作用域里，整段就该消失——这正是与内置工具段落一致的地方。
+const blindSections = [];
+const blindCtx = {
+  tools: { get: () => undefined },
+  systemPrompt: { section: (section) => blindSections.push(section) },
+};
+registerPromptSection(blindCtx, DEFAULT_ORDER)();
+check(
+  "工具不在作用域里时输出空串",
+  blindSections[0]?.text({ scope: undefined }) === "",
+  JSON.stringify(blindSections[0]?.text({ scope: undefined })),
+);
+
 check("文本不含 needs", !SECTION_TEXT.includes("needs"));
 check("文本不含“记忆”", !SECTION_TEXT.includes("记忆"));
 check(
@@ -165,31 +183,41 @@ check(
   REMOVED_TOOLS.filter((gone) => SECTION_TEXT.includes(gone)).join(", "),
 );
 check(
-  "文本提到全部六个工具",
-  SIX_TOOLS.every((want) => SECTION_TEXT.includes(want)),
-  SIX_TOOLS.filter((want) => !SECTION_TEXT.includes(want)).join(", "),
+  "文本提到完成与收尾要用的工具",
+  ["tree_task_status", "tree_task_plan", "tree_task_done"].every((want) =>
+    SECTION_TEXT.includes(want),
+  ),
+  ["tree_task_status", "tree_task_plan", "tree_task_done"]
+    .filter((want) => !SECTION_TEXT.includes(want))
+    .join(", "),
 );
+check(
+  "文本不再重复工具清单（用法交给各自的 description）",
+  !/tree_task_create|tree_task_update|tree_task_drop/u.test(SECTION_TEXT),
+);
+check("文本不再声称检查点会拒绝别的工具", !/一律被拒|只放行/u.test(SECTION_TEXT));
 check("文本不再讲资料注入", !SECTION_TEXT.includes("资料"));
 check(
   "registerPromptSection 返回 disposer（供 effect 持有）",
   typeof registerPromptSection(on.ctx, DEFAULT_ORDER) === "function",
 );
 
-// 再装配一次，确认这一段的字节不随装配次数变化。
+// 再装配一次，确认正文不随装配次数变化。
 const again = makeHarness();
 apply(again.ctx, { enabled: true, rootDir: stateRoot() });
 check(
-  "两次装配得到逐字节相同的一段",
-  again.sections[0]?.text === on.sections[0]?.text && again.sections.length === 1,
+  "两次装配得到相同的正文",
+  again.sections[0]?.text({ scope: undefined }) === on.sections[0]?.text({ scope: undefined }) &&
+    again.sections.length === 1,
 );
 
 // ---------------------------------------------------------------- 监听面
 
 console.log("\n监听面：");
-check("挂了检查点闸门", on.handlers.has("tools/pre-execute"));
+check("不挂 tools/pre-execute（插件不拦任何别的工具）", !on.handlers.has("tools/pre-execute"));
 check(
-  "pre-step 上正好两个监听（折叠 + 续行）",
-  (on.handlers.get("agent/pre-step") ?? []).length === 2,
+  "pre-step 上正好三个监听（折叠 + 续行 + 暂停闸门）",
+  (on.handlers.get("agent/pre-step") ?? []).length === 3,
   String((on.handlers.get("agent/pre-step") ?? []).length),
 );
 check("挂了停止信号监听", on.handlers.has("agent/turn-stopping"));
@@ -258,7 +286,7 @@ apply(off.ctx, { enabled: false, rootDir: stateRoot() });
 check("一个工具都不注册", off.tools.length === 0, String(off.tools.length));
 check("一段提示词都不注册", off.sections.length === 0, String(off.sections.length));
 check("不挂 pre-step", !off.handlers.has("agent/pre-step"));
-check("不挂检查点闸门", !off.handlers.has("tools/pre-execute"));
+check("未启用态同样不拦任何工具", !off.handlers.has("tools/pre-execute"));
 check("面板接口照挂", off.injected.length > 0, JSON.stringify(off.injected));
 
 // ---------------------------------------------------------------- 汇总

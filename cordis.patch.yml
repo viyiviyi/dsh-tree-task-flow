@@ -13,7 +13,7 @@
 #   enabled            总开关                          默认 false（装上 ≠ 启用）
 #   autoContinue       是否允许自动续行                默认 false（开着会让人停不下来）
 #   maxAutoRounds      连续自动续行轮次上限            默认 5
-#   promptOrder        静态说明段顺序                  默认 2000
+#   promptOrder        工具说明段顺序                  默认 1800
 #   rootDir            插件状态目录                    默认 $DSH_HOME/dsh-task-tree
 - insert:
     - id: task-tree
