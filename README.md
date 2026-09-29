@@ -335,8 +335,10 @@ dsh plugin --profile web remove dsh-tree-task-flow
 
 ## 设计文档
 
-- `docs/02-DSH插件开发方案.md` —— 完整设计：上下文组成、游标、折叠、检查点
+- `docs/02-DSH插件开发方案.md` —— 完整设计：上下文组成、折叠规则、检查点
+- `docs/03-折叠上下文实测.md` —— 折叠与真实上下文的实测对账
 - `docs/01-AIDesktop联动设计整理.md` —— 本插件最初的设计来源
+- `docs/04-版本发布流程.md` —— 维护者用：发布命令、registry 上架延迟、什么时候才能下结论
 
 ## 许可
 
