@@ -128,6 +128,15 @@ console.log("\n场景 1 · 六个工具的注册表与 schema");
     JSON.stringify(Object.keys(planTool.parameters.properties)),
   );
 
+  check(
+    "工具描述教了分层：任务是交付节点、子任务是步骤",
+    /交付节点/u.test(created.description) && /步骤/u.test(planTool.description),
+  );
+  check(
+    "tree_task_done 的 result 说明按两层分别写了写法",
+    /验收/u.test(done.description) && /验收/u.test(done.parameters.properties.result.description),
+  );
+
   for (const [name, def] of h.tools) {
     check(`  ${name} 的返回形状是 { text }`, def.output?.schema?.properties?.text?.type === "string");
   }
@@ -140,7 +149,7 @@ console.log("\n场景 2 · 完成必须交出 result");
   const h = makeHarness();
   const plan = createPlan({ title: "目标A", tasks: [{ title: "任务1" }] }, 1000);
   h.store.writePlan("s2", plan);
-  const [task1] = plan.goal.tasks;
+  const [task1] = plan.goals[0].tasks;
   addChildren(plan, task1.id, [{ title: "子1" }], 1000);
   const [step1] = task1.steps;
   const done = h.tools.get("tree_task_done");
@@ -163,7 +172,21 @@ console.log("\n场景 2 · 完成必须交出 result");
     step1.status === "done" && step1.result?.text === "子1 产出了 X",
     JSON.stringify({ status: step1.status, result: step1.result }),
   );
-  check("回执里带上提交的结果", /子1 产出了 X/u.test(good.text), good.text.slice(0, 160));
+  check(
+    "完成时返回的就是下一步该干什么",
+    good.text.startsWith("tree_task消息：") && good.text.includes("检查点"),
+    JSON.stringify(good.text).slice(0, 160),
+  );
+  check(
+    "返回里不重复提交内容",
+    !good.text.includes("子1 产出了 X"),
+    JSON.stringify(good.text).slice(0, 160),
+  );
+  check(
+    "tree_task_done 的说明里讲了返回内容与调用会留下",
+    /返回内容就是下一步/u.test(done.description) && /留在上下文里/u.test(done.description),
+    done.description,
+  );
 
   const twice = await done.execute({ id: step1.id, result: "再来一次" }, execFor("s2", "tree_task_done"));
   check("重复完成被拒", /已经是完成状态/u.test(twice.text), twice.text);
@@ -176,7 +199,7 @@ console.log("\n场景 3 · 三级固定的约束");
   const h = makeHarness();
   const plan = createPlan({ title: "目标A", tasks: [{ title: "任务1" }] }, 1000);
   h.store.writePlan("s6", plan);
-  const [task1] = plan.goal.tasks;
+  const [task1] = plan.goals[0].tasks;
   addChildren(plan, task1.id, [{ title: "子1" }], 1000);
   const [step1] = task1.steps;
 
@@ -189,7 +212,7 @@ console.log("\n场景 3 · 三级固定的约束");
   check("子任务不能再往下拆", /不能再拆/u.test(deeper.text), deeper.text);
 
   const onGoal = await planTool.execute(
-    { parentId: plan.goal.id, children: [{ title: "任务2" }] },
+    { parentId: plan.goals[0].id, children: [{ title: "任务2" }] },
     execFor("s6", "tree_task_plan"),
   );
   check("目标下追加的是任务", /已添加 1 个任务/u.test(onGoal.text), onGoal.text);
@@ -208,6 +231,43 @@ console.log("\n场景 3 · 三级固定的约束");
     execFor("s6-无计划", "tree_task_plan"),
   );
   check("没有计划时提示先建树", /还没有计划/u.test(noPlan.text), noPlan.text);
+}
+
+// ---------------------------------------------------------------- 场景 4
+
+console.log("\n场景 4 · 同一个会话里可以再立一个目标");
+{
+  const h = makeHarness();
+  const create = h.tools.get("tree_task_create");
+
+  const first = await create.execute(
+    { title: "目标A", tasks: [{ title: "任务1" }] },
+    execFor("s9", "tree_task_create"),
+  );
+  const plan1 = h.store.readPlan("s9");
+  check("第一次调用建起计划", /计划已建立/u.test(first.text) && plan1.goals.length === 1, first.text.slice(0, 60));
+
+  const second = await create.execute(
+    { title: "目标B", tasks: [{ title: "任务2" }] },
+    execFor("s9", "tree_task_create"),
+  );
+  const plan2 = h.store.readPlan("s9");
+  check(
+    "第二次调用是新增目标，不是替换整棵树",
+    /已新增目标/u.test(second.text) && plan2.goals.length === 2,
+    second.text.slice(0, 60),
+  );
+  check(
+    "第一个目标原样留着",
+    plan2.goals[0].id === plan1.goals[0].id && plan2.goals[0].title === "目标A",
+    JSON.stringify({ before: plan1.goals[0].id, after: plan2.goals[0].id }),
+  );
+  check("两个目标的 id 不同", plan2.goals[0].id !== plan2.goals[1].id);
+  check(
+    "返回的树里两个目标都在",
+    second.text.includes("目标A") && second.text.includes("目标B"),
+    second.text.slice(0, 120),
+  );
 }
 
 // ---------------------------------------------------------------- 汇总

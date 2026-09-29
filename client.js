@@ -166,11 +166,29 @@ window.__ModuleLoader__.load({
 			return { total, done };
 		}
 
+		/** 计划里的全部目标。一个会话可以有多个目标，它们是最外层的兄弟。 */
+		function goalsOf(data) {
+			return data?.plan?.goals || [];
+		}
+
+		/** 当前该盯着哪个目标：活动路径上的那个；没有就取第一个还没结束的，再退到最后一个。 */
+		function focusGoal(data) {
+			const goals = goalsOf(data);
+			if (goals.length === 0) return null;
+			const here = goals.find((each) => each.id === data?.active?.goalId);
+			if (here) return here;
+			return (
+				goals.find((each) => each.status !== "done" && each.status !== "dropped") ||
+				goals[goals.length - 1]
+			);
+		}
+
 		/** 当前活动节点的标题：子任务优先，其次任务，最后目标。 */
 		function currentLabel(data) {
 			const active = data.active;
 			if (!active) return "";
-			const goal = data.plan.goal;
+			const goal = focusGoal(data);
+			if (!goal) return "";
 			const task = (goal.tasks || []).find((each) => each.id === active.taskId);
 			if (!task) return goal.title;
 			const step = (task.steps || []).find((each) => each.id === active.stepId);
@@ -198,7 +216,7 @@ window.__ModuleLoader__.load({
 			const checkpoint = data.checkpoint;
 			if (checkpoint !== null && checkpoint !== undefined && typeof checkpoint.id === "string") {
 				ids.add(checkpoint.id);
-				const goalId = data.plan?.goal?.id;
+				const goalId = focusGoal(data)?.id;
 				if (checkpoint.level !== "goal" && typeof goalId === "string") ids.add(goalId);
 			}
 			return ids;
@@ -229,6 +247,7 @@ window.__ModuleLoader__.load({
 			"label.noResult": "（还没提交结果）",
 			"label.current": "当前",
 			"label.checkpointHere": "检查点",
+			"label.goals": "{count} 个目标",
 			"placeholder.result":
 				"写清这个节点产出了什么。它整段执行过程会被这条结果顶替，所以要能独立看懂。",
 			"hint.noChildren": "（还没有子节点 → 让模型调用 tree_task_plan）",
@@ -261,6 +280,7 @@ window.__ModuleLoader__.load({
 			"label.noResult": "(no result submitted yet)",
 			"label.current": "current",
 			"label.checkpointHere": "checkpoint",
+			"label.goals": "{count} goals",
 			"placeholder.result":
 				"State what this node produced. Its whole execution range is replaced by this result, so it must stand on its own.",
 			"hint.noChildren": "(no children yet → ask the model to call tree_task_plan)",
@@ -457,8 +477,8 @@ window.__ModuleLoader__.load({
 		/**
 		 * 一个节点：一行标题 + 可展开的详情。
 		 *
-		 * 三层共用同一个组件——它们的字段与动作本来就一样，差别只有缩进和
-		 * 「能不能丢弃」（整个目标不能丢，plan.js 会拒绝）。
+		 * 三层共用同一个组件——它们的字段与动作本来就一样，差别只有缩进，
+		 * 以及"这一层要不要给丢弃按钮"（目标、任务、子任务都能丢）。
 		 */
 		function NodeRow({ node, depth, activeIds, openIds, checkpointId, canDrop, sessionId, reload, t }) {
 			const children = node.tasks || node.steps || [];
@@ -662,8 +682,18 @@ window.__ModuleLoader__.load({
 			if (state.loading || state.empty || !state.data) return null;
 
 			const data = state.data;
-			const goal = data.plan.goal;
-			const stats = countNodes(goal);
+			const goals = goalsOf(data);
+			if (goals.length === 0) return null;
+			// 一个会话可能有多个目标：条上给总数与合计进度，正文里把它们都列出来，
+			// 展开状态仍旧只摊开正在走的那条路径。
+			const stats = goals.reduce(
+				(acc, each) => {
+					const one = countNodes(each);
+					return { total: acc.total + one.total, done: acc.done + one.done };
+				},
+				{ total: 0, done: 0 },
+			);
+			const heading = goals.length === 1 ? goals[0].title : t("label.goals", { count: goals.length });
 			const current = currentLabel(data);
 			// 「被按住」有两条来源：插件闸门（paused）与人按过界面停止（stopped）。
 			// 对用户来说都是"停着呢，点继续就能接着跑"，所以合成一个状态展示。
@@ -687,7 +717,7 @@ window.__ModuleLoader__.load({
 						{ className: "dsh-ttf-bar" },
 						h("span", { className: "dsh-ttf-glyph", "aria-hidden": true }, icon("IconChecklistOutline14", 14)),
 						h("span", { className: "dsh-ttf-label" + (held ? " dsh-ttf-labelHeld" : "") }, stateLabel),
-						h("span", { className: "dsh-ttf-title", title: goal.title }, goal.title),
+						h("span", { className: "dsh-ttf-title", title: heading }, heading),
 						h(
 							"span",
 							{ className: "dsh-ttf-progress" },
@@ -735,18 +765,21 @@ window.__ModuleLoader__.load({
 										)
 									: null,
 								held ? h("div", { className: "dsh-ttf-note" }, t("note.paused")) : null,
-								h(NodeRow, {
-									node: goal,
-									depth: 0,
-									activeIds: currentIds(data),
-									openIds: defaultOpenIds(data),
-									checkpointId: data.checkpoint ? data.checkpoint.id : null,
-									// 整个目标不能丢弃：plan.js 会拒绝，这里也不给按钮。
-									canDrop: false,
-									sessionId,
-									reload,
-									t,
-								}),
+								goals.map((each) =>
+									h(NodeRow, {
+										key: each.id,
+										node: each,
+										depth: 0,
+										activeIds: currentIds(data),
+										openIds: defaultOpenIds(data),
+										checkpointId: data.checkpoint ? data.checkpoint.id : null,
+										// 目标也能丢：丢弃会连同它下面的任务与子任务一起走。
+										canDrop: true,
+										sessionId,
+										reload,
+										t,
+									}),
+								),
 							)
 						: null,
 				),

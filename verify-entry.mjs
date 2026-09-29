@@ -183,21 +183,39 @@ check(
   REMOVED_TOOLS.every((gone) => !SECTION_TEXT.includes(gone)),
   REMOVED_TOOLS.filter((gone) => SECTION_TEXT.includes(gone)).join(", "),
 );
+check("文本以通配点名这组工具", SECTION_TEXT.includes("tree_task_*"));
 check(
-  "文本提到完成与收尾要用的工具",
-  ["tree_task_status", "tree_task_plan", "tree_task_done"].every((want) =>
-    SECTION_TEXT.includes(want),
-  ),
-  ["tree_task_status", "tree_task_plan", "tree_task_done"]
-    .filter((want) => !SECTION_TEXT.includes(want))
-    .join(", "),
-);
-check(
-  "文本不再重复工具清单（用法交给各自的 description）",
-  !/tree_task_create|tree_task_update|tree_task_drop/u.test(SECTION_TEXT),
+  "文本不逐个点名工具（用法交给各自的 description）",
+  !/tree_task_(create|update|drop|status|plan|done)/u.test(SECTION_TEXT),
 );
 check("文本不再声称检查点会拒绝别的工具", !/一律被拒|只放行/u.test(SECTION_TEXT));
-check("文本不再讲资料注入", !SECTION_TEXT.includes("资料"));
+check("文本不再讲资料注入", !/资料注入|注入资料/u.test(SECTION_TEXT));
+check(
+  "提示词教了分层：目标、任务交付节点、任务执行步骤三级",
+  SECTION_TEXT.includes("目标") &&
+    SECTION_TEXT.includes("任务交付节点") &&
+    SECTION_TEXT.includes("任务执行步骤") &&
+    SECTION_TEXT.includes("三级"),
+);
+check(
+  "提示词讲了 result 写什么",
+  SECTION_TEXT.includes("result") &&
+    ["产物", "结论", "问题"].every((want) => SECTION_TEXT.includes(want)),
+);
+check(
+  "段落是动作导向的：不解释机制、不定义概念",
+  !SECTION_TEXT.includes("折叠的边界") && !SECTION_TEXT.includes("它就是"),
+);
+check(
+  "段落与内置段落同风格：无标题、无加粗、无列表",
+  !/^#/mu.test(SECTION_TEXT) &&
+    !SECTION_TEXT.includes("**") &&
+    !/^\s*[-*] /mu.test(SECTION_TEXT),
+);
+check(
+  "分层规则不掺臆造数字（不给步数/轮数的承诺）",
+  !/\d+\s*~\s*\d+/u.test(SECTION_TEXT) && !/\d+\s*(steps|rounds)/iu.test(SECTION_TEXT),
+);
 check(
   "registerPromptSection 返回 disposer（供 effect 持有）",
   typeof registerPromptSection(on.ctx, DEFAULT_ORDER) === "function",

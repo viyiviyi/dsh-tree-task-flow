@@ -341,10 +341,11 @@ const DATA = {
   ok: true,
   plan: {
     sessionId: "s1",
-    goal: {
-      id: "g1",
-      title: "示例目标",
-      detail: "目标的补充说明",
+    goals: [
+      {
+        id: "g1",
+        title: "示例目标",
+        detail: "目标的补充说明",
       status: "pending",
       tasks: [
         {
@@ -366,7 +367,7 @@ const DATA = {
           ],
         },
       ],
-    },
+    }],
   },
   // 渲染单测：把当前项指到最深一层，好一次看见整条活动路径。
   active: { goalId: "g1", taskId: "t1", stepId: "x1" },
@@ -466,15 +467,17 @@ const TWO = {
   ok: true,
   plan: {
     sessionId: "s1",
-    goal: {
-      id: "g1",
-      title: "示例目标",
-      status: "pending",
-      tasks: [
-        { id: "t1", title: "任务一", status: "done", steps: [{ id: "x1", title: "子任务一", status: "done" }] },
-        { id: "t2", title: "任务二", status: "pending", steps: [{ id: "x2", title: "子任务二", status: "pending" }] },
-      ],
-    },
+    goals: [
+      {
+        id: "g1",
+        title: "示例目标",
+        status: "pending",
+        tasks: [
+          { id: "t1", title: "任务一", status: "done", steps: [{ id: "x1", title: "子任务一", status: "done" }] },
+          { id: "t2", title: "任务二", status: "pending", steps: [{ id: "x2", title: "子任务二", status: "pending" }] },
+        ],
+      },
+    ],
   },
   active: { goalId: "g1", taskId: "t2", stepId: "x2" },
   checkpoint: null,
@@ -485,6 +488,39 @@ const two = renderDock(TWO, true);
 check("目标展开，两条任务都看得见", hasText(two, "任务一") && hasText(two, "任务二"));
 check("当前任务展开，看得见正在跑的子任务", hasText(two, "子任务二"));
 check("已经收尾的任务默认收起，不画它的子节点", !hasText(two, "子任务一"));
+
+console.log("\n多个目标：");
+const MULTI = {
+  ok: true,
+  plan: {
+    sessionId: "s1",
+    goals: [
+      TWO.plan.goals[0],
+      {
+        id: "g2",
+        title: "第二个目标",
+        status: "pending",
+        tasks: [
+          {
+            id: "t3",
+            title: "任务三",
+            status: "pending",
+            steps: [{ id: "x3", title: "子任务三", status: "pending" }],
+          },
+        ],
+      },
+    ],
+  },
+  active: { goalId: "g2", taskId: "t3", stepId: "x3" },
+  checkpoint: null,
+  stopped: false,
+  paused: false,
+};
+const multi = renderDock(MULTI, true);
+check("多个目标时，条上写的是目标个数", hasText(multi, "2 个目标"));
+check("两个目标都渲染出来", hasText(multi, "示例目标") && hasText(multi, "第二个目标"));
+check("正在走的那个目标默认摊开", hasText(multi, "子任务三"));
+check("已经收尾的那个目标默认收起", !hasText(multi, "子任务一"));
 
 const checkpointed = renderDock(
   Object.assign({}, TWO, {
@@ -523,12 +559,11 @@ check(
   "旧写法已经清干净（pre 呈现、三层 padding 缩进）",
   !SOURCE.includes("dsh-ttf-pre") && !SOURCE.includes("dsh-ttf-depth0{padding-left"),
 );
-check("目标上没有「丢弃」（整棵树不能被丢）", byAria(expanded, "丢弃").length >= 1);
-
 const dropButtons = byAria(expanded, "丢弃");
+// 这份数据里「子任务一」已经完成（完成态不给丢弃按钮），还开着的只剩目标与任务一。
 check(
-  "「丢弃」只给任务与子任务（目标不给）",
-  dropButtons.length === 1,
+  "还开着的节点都能丢——目标也算一个",
+  dropButtons.length === 2,
   String(dropButtons.length),
 );
 
