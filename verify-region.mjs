@@ -1,6 +1,18 @@
 /**
  * region.js 的折叠行为自测。
  *
+ * 钉住的规则只有一条，纯表层、与计划树无关：
+ *
+ *   从上一个**边界调用**之后，到下一个 `tree_task_done` 之前，中间那一段过程收走。
+ *   边界调用 = `tree_task_create` / `tree_task_plan` / `tree_task_done`。
+ *
+ * 由此推出四件必须成立的事：
+ *
+ *   1. 边界调用的调用与返回都留在表层上（模型靠它们看计划与下一步）；
+ *   2. 中间夹着真人消息就**整段不折**——往前折丢需求，往后折丢回应；
+ *   3. 两次边界调用挨着（中间没有过程）就**什么都不注入**；
+ *   4. 末尾最近的那次边界调用不是 done（比如刚调完 plan）就不折。
+ *
  * 假 session 忠实复刻 DSH 的三条硬规则，否则测出来的东西不算数：
  *
  *   1. `replace` 用 `nodes.splice(startIdx, count, seq)` —— **保持位置**，
@@ -11,8 +23,7 @@
  * 跑：node verify-region.mjs
  */
 
-import { addChildren, addGoal, activePath, checkpointOf, complete, createPlan, dropNode } from "./lib/plan.js";
-import { closedFrom, foldFinishedLevels, syncCursors } from "./lib/region.js";
+import { foldOnce, foldRange, touchedFiles } from "./lib/region.js";
 
 let pass = 0;
 const failures = [];
@@ -80,12 +91,6 @@ function makeSession(id = "session-test") {
     append,
     /** 测试用：当前 surface 的 seq（位置顺序）。 */
     live: () => [...nodes],
-    /** 测试用：把一个节点移出 surface，模拟压缩把它遮掉。 */
-    shadowOut(seq) {
-      const idx = nodes.indexOf(seq);
-      if (idx === -1) throw new Error(`shadowOut: ${seq} not on surface`);
-      nodes.splice(idx, 1);
-    },
   };
 }
 
@@ -101,8 +106,7 @@ function surfaceLines(session) {
   return session.live().map((seq) => {
     const event = session.eventAt(seq);
     const text = textOf(event);
-    const plugin = event?.data?.source?.plugin ?? event?.data?.message?.source?.plugin ?? "-";
-    return `#${seq} ${event?.type} [${plugin}] ${text.slice(0, 40).replace(/\n/gu, " ")}`;
+    return `#${seq} ${event?.type} ${text.slice(0, 64).replace(/\n/gu, " ⏎ ")}`;
   });
 }
 
@@ -114,76 +118,93 @@ function work(session, rounds) {
   }
 }
 
-function newCursors(sessionId) {
-  return { sessionId, goal: null, task: null, step: null, updatedAt: null };
+/** 模拟一次工具调用：assistant/message（tool-call）+ tool/result。 */
+function toolCall(session, name, args, id) {
+  const call = session.append(
+    "assistant/message",
+    { message: { content: [{ type: "tool-call", id, name, arguments: JSON.stringify(args ?? {}) }] } },
+    { surfaceOp: "append" },
+  ).seq;
+  const result = session.append(
+    "tool/result",
+    { message: { content: [{ type: "tool-result", toolCallId: id, content: [{ type: "text", text: `${name} 的返回` }] }] } },
+    { surfaceOp: "append" },
+  ).seq;
+  return { call, result };
 }
 
+/** 三个边界调用。 */
+const create = (session, id) => toolCall(session, "tree_task_create", { title: "目标" }, id);
+const plan = (session, id) => toolCall(session, "tree_task_plan", { parentId: "g-1" }, id);
+const done = (session, id) => toolCall(session, "tree_task_done", { id: "s-1", result: "结果" }, id);
+
+/** 模拟一次文件类工具调用。 */
+function fileCall(session, tool, path, id) {
+  toolCall(session, tool, { file_path: path }, id);
+}
+
+/** 真人发言（带 source；插件注入的消息 source 是 plugin）。 */
+function humanSay(session, text) {
+  return session.append(
+    "user/message",
+    { content: [{ type: "text", text }], source: { kind: "user" } },
+    { surfaceOp: "append" },
+  ).seq;
+}
+
+/** 系统提示词 + 一条真人消息：真实会话的开头。 */
 function boot(session) {
   session.append("system/message", { message: { content: [{ type: "text", text: "系统提示词" }] } }, { surfaceOp: "append" });
-  session.append("user/message", { content: [{ type: "text", text: "用户消息" }] }, { surfaceOp: "append" });
+  humanSay(session, "帮我做件事");
 }
 
-/** 造一棵三级齐全的树：目标 A / 任务1（子1 子2 子3）+ 任务2。 */
-function makeTree() {
-  const plan = createPlan({ title: "目标A", tasks: [{ title: "任务1" }, { title: "任务2" }] }, 1000);
-  const [goal] = plan.goals;
-  const [task1, task2] = goal.tasks;
-  addChildren(plan, task1.id, [{ title: "子1" }, { title: "子2" }, { title: "子3" }], 1000);
-  const [step1, step2, step3] = task1.steps;
-  return { plan, goal, task1, task2, step1, step2, step3 };
+/** surface 上最后一条折叠通告。 */
+function lastNotice(session) {
+  const live = session.live();
+  for (let index = live.length - 1; index >= 0; index -= 1) {
+    const text = textOf(session.eventAt(live[index]));
+    if (text.startsWith("tree_task消息：隐藏了")) return { seq: live[index], text };
+  }
+  return null;
 }
 
-/** 走一次 pre-step：先折叠，再对齐游标。 */
-function step(session, cursors, plan, now) {
-  const active = activePath(plan);
-  const folded = foldFinishedLevels(ctx, session, cursors, plan, active);
-  const synced = syncCursors(session, cursors, active);
-  if (folded || synced) cursors.updatedAt = now;
-  return active;
+function countNotices(session) {
+  return session.live().filter((seq) => textOf(session.eventAt(seq)).startsWith("tree_task消息：隐藏了")).length;
 }
 
 // ---------------------------------------------------------------- 场景 1
 
-console.log("\n场景 1 · 同级折叠不碰上一条汇总");
+console.log("\n场景 1 · 区间就是两次边界调用之间那一段");
 {
-  const { plan, step1, step2 } = makeTree();
   const session = makeSession();
   boot(session);
-  const cursors = newCursors(session.id);
-
-  // 进入子1：立游标
-  step(session, cursors, plan, 1000);
-  check("进入子1时三层游标都立在入口边界", cursors.goal?.cursor === 1 && cursors.task?.cursor === 1 && cursors.step?.cursor === 1,
-    JSON.stringify({ goal: cursors.goal, task: cursors.task, step: cursors.step }));
-
-  // 子1 干完活 → 完成 → 折叠
-  work(session, 3);
-  complete(plan, step1.id, "子1 的结果", 1100);
-  step(session, cursors, plan, 1100);
-
-  const afterFirst = session.live();
-  const foldA = afterFirst[afterFirst.length - 1];
-  check("子1 的执行过程被折叠成一条汇总", afterFirst.length === 3, `surface = ${JSON.stringify(afterFirst)}`);
-  check("汇总报出子1已完成、过程已归档",
-    textOf(session.eventAt(foldA)).includes("步骤「子1」") &&
-      textOf(session.eventAt(foldA)).includes("已经完成，执行过程已归档"));
-  check("游标停在刚落下的汇总上", cursors.step?.cursor === foldA, `cursor=${cursors.step?.cursor} fold=${foldA}`);
-  check("任务级游标没有被推动", cursors.task?.cursor === 1, `task.cursor=${cursors.task?.cursor}`);
-
-  // 子2 干完活 → 完成 → 折叠
+  const c = create(session, "c1");
   work(session, 2);
-  complete(plan, step2.id, "子2 的结果", 1200);
-  step(session, cursors, plan, 1200);
+  const p = plan(session, "p1");
+  work(session, 3);
+  const d = done(session, "d1");
 
-  const afterSecond = session.live();
-  const foldB = afterSecond[afterSecond.length - 1];
-  check("上一条汇总仍在 surface 上", afterSecond.includes(foldA), `surface = ${JSON.stringify(afterSecond)}`);
-  check("子1的汇总没有被清空或改写", textOf(session.eventAt(foldA)).includes("步骤「子1」"));
-  check("子2 的汇总另起一条",
-    foldB !== foldA &&
-      textOf(session.eventAt(foldB)).includes("步骤「子2」") &&
-      textOf(session.eventAt(foldB)).includes("已经完成"));
-  check("两次折叠后 surface 恰好是 入口 + 两条汇总", afterSecond.length === 4, `surface = ${JSON.stringify(afterSecond)}`);
+  const live = session.live();
+  const range = foldRange(session);
+  check("区间起点在 plan 调用之后（连它的返回一起跳过）",
+    range !== null && range.from === live.indexOf(p.result) + 1,
+    `range=${JSON.stringify(range)} surface=${JSON.stringify(live)}`);
+  check("区间终点在 done 调用之前",
+    range !== null && range.to === live.indexOf(d.call) - 1,
+    `range=${JSON.stringify(range)}`);
+
+  const folded = foldOnce(ctx, session);
+  const after = session.live();
+  const notice = lastNotice(session);
+  check("确实折了", folded === true && notice !== null, JSON.stringify(after));
+  check("只报了 plan 与 done 之间那 6 条",
+    notice.text === "tree_task消息：隐藏了6条过程上下文。", JSON.stringify(notice.text));
+  check("create / plan / done 的调用与返回都还在",
+    [c, p, d].every((each) => after.includes(each.call) && after.includes(each.result)),
+    `surface = ${JSON.stringify(after)}`);
+  check("通告落在 plan 返回之后、done 调用之前",
+    after.indexOf(notice.seq) > after.indexOf(p.result) && after.indexOf(notice.seq) < after.indexOf(d.call),
+    `surface = ${JSON.stringify(after)}`);
 
   console.log("  surface:");
   for (const line of surfaceLines(session)) console.log(`    ${line}`);
@@ -191,411 +212,189 @@ console.log("\n场景 1 · 同级折叠不碰上一条汇总");
 
 // ---------------------------------------------------------------- 场景 2
 
-console.log("\n场景 2 · 三级边界各自正确");
+console.log("\n场景 2 · 末尾最近的那次边界调用不是 done 就不折");
 {
-  const { plan, task1, step1, step2, step3 } = makeTree();
   const session = makeSession();
   boot(session);
-  const cursors = newCursors(session.id);
-
-  step(session, cursors, plan, 1000);
-  const goalCursor = cursors.goal.cursor;
-
-  // 三个子任务依次完成，每次折叠
-  for (const [index, target] of [step1, step2, step3].entries()) {
-    work(session, 1);
-    complete(plan, target.id, `${target.title} 的结果`, 1100 + index);
-    step(session, cursors, plan, 1100 + index);
-  }
-
-  const afterSteps = session.live();
-  check("三条子任务汇总都在", afterSteps.length === 5, `surface = ${JSON.stringify(afterSteps)}`);
-  check("任务级游标仍然停在入口边界", cursors.task?.cursor === 1, `task.cursor=${cursors.task?.cursor}`);
-
-  // 任务1 完成 → 折叠任务层
+  create(session, "c1");
   work(session, 2);
-  complete(plan, task1.id, "任务1 的结果", 1300);
-  step(session, cursors, plan, 1300);
+  plan(session, "p1");
+  work(session, 1);
 
-  const afterTask = session.live();
-  const taskFold = afterTask[afterTask.length - 1];
-  check("任务折叠把三条子任务汇总一起收走", afterTask.length === 3, `surface = ${JSON.stringify(afterTask)}`);
-  check("落下的是一条任务级通告",
-    textOf(session.eventAt(taskFold)).includes("任务「任务1」") &&
-      textOf(session.eventAt(taskFold)).includes("已经完成，执行过程已归档"));
-  check("折叠掉的区间包含全部子任务汇总", !afterTask.some((seq) => textOf(session.eventAt(seq)).includes("步骤「子1」")));
-  check("目标级游标没有被推动", cursors.goal?.cursor === goalCursor, `goal.cursor=${cursors.goal?.cursor} expected=${goalCursor}`);
-  check("任务级游标更新为任务汇总", cursors.task?.cursor === taskFold, `task.cursor=${cursors.task?.cursor}`);
-
-  console.log("  surface:");
-  for (const line of surfaceLines(session)) console.log(`    ${line}`);
+  check("刚调完 plan，还没完成任何节点：这一轮不折",
+    foldRange(session) === null && foldOnce(ctx, session) === false,
+    `surface = ${JSON.stringify(session.live())}`);
+  check("什么都没注入", countNotices(session) === 0);
+  check("没有抛异常、没有 warn", warnings.length === 0, JSON.stringify(warnings));
 }
 
 // ---------------------------------------------------------------- 场景 3
 
-console.log("\n场景 3 · 一次完成多个节点合并成一条");
+console.log("\n场景 3 · 两次边界调用挨着：什么都不注入");
 {
-  const { plan, step1, step2 } = makeTree();
   const session = makeSession();
   boot(session);
-  const cursors = newCursors(session.id);
+  create(session, "c1");
+  plan(session, "p1");
+  done(session, "d1");
 
-  step(session, cursors, plan, 1000);
-  work(session, 2);
-
-  // 一轮里连着完成两个子任务
-  complete(plan, step1.id, "子1 的结果", 1100);
-  complete(plan, step2.id, "子2 的结果", 1101);
-  step(session, cursors, plan, 1101);
-
-  const after = session.live();
-  check("两个子任务合成一条汇总", after.length === 3, `surface = ${JSON.stringify(after)}`);
-  const merged = textOf(session.eventAt(after[after.length - 1]));
-  check("合并的汇总同时报出两个步骤",
-    merged.includes("步骤「子1」") && merged.includes("步骤「子2」") && merged.includes("已经完成"));
+  const before = session.live();
+  check("中间没有过程，区间为空", foldRange(session) === null, `surface = ${JSON.stringify(before)}`);
+  check("不折也不注入", foldOnce(ctx, session) === false && countNotices(session) === 0);
+  check("表层一个节点都没变",
+    JSON.stringify(session.live()) === JSON.stringify(before), JSON.stringify(session.live()));
 }
 
 // ---------------------------------------------------------------- 场景 4
 
-console.log("\n场景 4 · 游标失效");
+console.log("\n场景 4 · 中间夹着真人消息：整段不折");
 {
-  const { plan, task1, step1 } = makeTree();
   const session = makeSession();
   boot(session);
-  const cursors = newCursors(session.id);
-
-  step(session, cursors, plan, 1000);
-  work(session, 2);
-  complete(plan, step1.id, "子1 的结果", 1100);
-  step(session, cursors, plan, 1100);
-
-  const beforeStep4 = session.live();
-  check("场景 4 前置：子1 已折叠", beforeStep4.length === 3, `surface = ${JSON.stringify(beforeStep4)}`);
-
-  // 游标指向的节点被压缩遮掉
-  const lost = cursors.step.cursor;
-  session.shadowOut(lost);
+  create(session, "c1");
   work(session, 1);
-  complete(plan, task1.steps[1].id, "子2 的结果", 1200);
-  step(session, cursors, plan, 1200);
+  const ask = humanSay(session, "等等，先别写文件");
+  work(session, 2);
+  done(session, "d1");
 
-  const after = session.live();
-  const appended = after[after.length - 1];
-  check("游标失效时仍落下一段通告",
-    textOf(session.eventAt(appended)).includes("步骤「子2」") &&
-      textOf(session.eventAt(appended)).includes("执行过程已归档"),
-    `surface = ${JSON.stringify(after)}；末节点文本=${JSON.stringify(textOf(session.eventAt(appended)).slice(0, 60))}`);
-  check("游标失效时不抛异常、不阻断会话", warnings.length === 0, `warnings=${JSON.stringify(warnings)}`);
-  check("失效的游标被重新对齐到 surface 上", after.includes(cursors.step?.cursor), `cursor=${cursors.step?.cursor} surface=${JSON.stringify(after)}`);
+  const before = session.live();
+  const range = foldRange(session);
+  check("区间确实横跨了那条真人消息",
+    range !== null && range.shadowed.includes(ask), JSON.stringify(range));
+  check("整段不折", foldOnce(ctx, session) === false, `surface = ${JSON.stringify(before)}`);
+  check("一个节点都没动、也没注入",
+    JSON.stringify(session.live()) === JSON.stringify(before) && countNotices(session) === 0);
 }
 
 // ---------------------------------------------------------------- 场景 5
 
-console.log("\n场景 5 · 汇总只报归档，「下一步」交给 tree_task_done 的结果");
+console.log("\n场景 5 · 真人消息在区间之外不影响折叠");
 {
-  const { plan, task1, step1, step2, step3 } = makeTree();
   const session = makeSession();
   boot(session);
-  const cursors = newCursors(session.id);
+  const ask = humanSay(session, "换个说法");
+  const c = create(session, "c1");
+  work(session, 1);
+  done(session, "d1");
 
-  step(session, cursors, plan, 1000);
-  const summaries = [];
-  for (const [index, target] of [step1, step2, step3].entries()) {
-    work(session, 1);
-    complete(plan, target.id, `${target.title} 的结果`, 1100 + index);
-    step(session, cursors, plan, 1100 + index);
-    const live = session.live();
-    summaries.push(textOf(session.eventAt(live[live.length - 1])));
-  }
-
-  check("汇总只报归档，不替 done 的结果说下一步",
-    summaries[0].startsWith("tree_task消息：") &&
-      summaries[0].includes(`步骤「${step1.title}」`) &&
-      summaries[0].includes("执行过程已归档") &&
-      !summaries[0].includes("接下来需要进行"),
-    `第1条汇总=${JSON.stringify(summaries[0].slice(0, 160))}`);
-
-  const lastText = summaries[summaries.length - 1];
-  check("检查点不进汇总（它在 done 的返回里）",
-    lastText.includes("步骤「子3」") && !lastText.includes("检查点"),
-    `末条汇总=${JSON.stringify(lastText.slice(0, 160))}`);
-
-  const checkpoint = checkpointOf(plan);
-  check("检查点落在任务1上", checkpoint?.node?.id === task1.id, JSON.stringify(checkpoint?.node?.id));
+  const folded = foldOnce(ctx, session);
+  const after = session.live();
+  const notice = lastNotice(session);
+  check("照折", folded === true && notice !== null, JSON.stringify(after));
+  check("那条真人消息不在区间里、也还在表层上",
+    after.includes(ask), `surface = ${JSON.stringify(after)}`);
+  check("create 的调用与返回也还在",
+    after.includes(c.call) && after.includes(c.result), `surface = ${JSON.stringify(after)}`);
 }
 
 // ---------------------------------------------------------------- 场景 6
 
-console.log("\n场景 6 · 丢弃的节点与完成的节点合进同一条汇总");
+console.log("\n场景 6 · 正文附上读写了哪些文件");
 {
-  const { plan, step1, step2 } = makeTree();
   const session = makeSession();
   boot(session);
-  const cursors = newCursors(session.id);
+  create(session, "c1");
+  fileCall(session, "read", "C:/w/a.js", "r1");
+  fileCall(session, "read", "C:/w/b.js", "r2");
+  fileCall(session, "read", "C:/w/a.js", "r3");
+  fileCall(session, "write", "C:/w/c.js", "w1");
+  fileCall(session, "edit", "C:/w/c.js", "e1");
+  toolCall(session, "pwsh", { command: "node x.js" }, "p1");
+  done(session, "d1");
 
-  step(session, cursors, plan, 1000);
-  work(session, 1);
-
-  complete(plan, step1.id, "子1 的结果", 1100);
-  dropNode(plan, step2.id, 1101);
-  step(session, cursors, plan, 1101);
-
-  const after = session.live();
-  check("完成与丢弃合并成一条汇总", after.length === 3, `surface = ${JSON.stringify(after)}`);
-  const text = textOf(session.eventAt(after[after.length - 1]));
-  check("汇总同时记录完成与丢弃", text.includes("步骤「子1」") && text.includes("已被丢弃"),
-    JSON.stringify(text.slice(0, 120)));
+  foldOnce(ctx, session);
+  const notice = lastNotice(session);
+  check("读取列表去重、按出现顺序",
+    notice.text.includes("读取：C:/w/a.js、C:/w/b.js"), JSON.stringify(notice.text));
+  check("写入列表分开列，同一文件既读又写也各算一次",
+    notice.text.includes("写入：C:/w/c.js"), JSON.stringify(notice.text));
+  check("命令类调用不产生文件条目", !notice.text.includes("d.js"), JSON.stringify(notice.text));
+  check("多行：条数一行、读一行、写一行", notice.text.split("\n").length === 3, JSON.stringify(notice.text));
 }
 
 // ---------------------------------------------------------------- 场景 7
 
-console.log("\n场景 7 · 刚调完的 tree_task_done 不被折叠卷走");
+console.log("\n场景 7 · done 之后又干活，区间仍止于新的那次 done 之前");
 {
-  const { plan, step1 } = makeTree();
   const session = makeSession();
   boot(session);
-  const cursors = newCursors(session.id);
-
-  step(session, cursors, plan, 1000);
+  create(session, "c1");
+  work(session, 1);
+  const d1 = done(session, "d1");
   work(session, 2);
+  const d2 = done(session, "d2");
 
-  // 模拟一次 tree_task_done：assistant/message（里面是这次 tool-call）+ tool/result
-  const callSeq = session.append(
-    "assistant/message",
-    {
-      message: {
-        content: [{ type: "tool-call", id: "call_1", name: "tree_task_done", arguments: "{}" }],
-      },
-    },
-    { surfaceOp: "append" },
-  ).seq;
-  const resultSeq = session.append(
-    "tool/result",
-    {
-      message: {
-        content: [{ type: "tool-result", toolCallId: "call_1", content: [{ type: "text", text: "tree_task消息：接下来需要进行步骤：「子2」(s-2)。" }] }],
-      },
-    },
-    { surfaceOp: "append" },
-  ).seq;
-
-  complete(plan, step1.id, "子1 的结果", 1100);
-  step(session, cursors, plan, 1100);
-
+  foldOnce(ctx, session);
   const after = session.live();
-  const noticeSeq = after[after.indexOf(callSeq) - 1];
-  check("done 调用与它的结果都留在表层上",
-    after.includes(callSeq) && after.includes(resultSeq),
+  const notice = lastNotice(session);
+  check("区间从 d1 调用之后收到 d2 调用之前（那 4 条过程）",
+    notice !== null && notice.text === "tree_task消息：隐藏了4条过程上下文。", JSON.stringify(notice?.text));
+  check("d1 与 d2 的调用和返回都还在",
+    [d1, d2].every((each) => after.includes(each.call) && after.includes(each.result)),
     `surface = ${JSON.stringify(after)}`);
-  check("落下的通告排在 done 调用之前，且带着这次完成",
-    noticeSeq !== undefined &&
-      after.indexOf(noticeSeq) < after.indexOf(callSeq) &&
-      textOf(session.eventAt(noticeSeq)).includes("步骤「子1」") &&
-      textOf(session.eventAt(noticeSeq)).includes("已经完成，执行过程已归档"),
-    `notice=${noticeSeq} call=${callSeq} surface=${JSON.stringify(after)}`);
-  check("提示（done 的结果）还在表层上可读",
-    JSON.stringify(session.eventAt(resultSeq)).includes("接下来需要进行步骤"));
-  check("折叠后游标停在刚落下的通告上（不是末尾的 done 调用）",
-    cursors.step?.cursor === noticeSeq,
-    `cursor=${cursors.step?.cursor} notice=${noticeSeq} result=${resultSeq}`);
 }
 
 // ---------------------------------------------------------------- 场景 8
 
-console.log("\n场景 8 · 全树完成后再开新树：不回头折叠旧对话");
+console.log("\n场景 8 · 找不到更早的边界调用：退回表层第一个节点之后");
 {
-  const old = makeTree();
   const session = makeSession();
   boot(session);
-  const cursors = newCursors(session.id);
+  work(session, 2);
+  done(session, "d1");
 
-  // 走完整棵旧树
-  step(session, cursors, old.plan, 1000);
-  for (const [index, target] of [old.step1, old.step2, old.step3].entries()) {
-    work(session, 1);
-    complete(old.plan, target.id, `${target.title} 的结果`, 1100 + index);
-    step(session, cursors, old.plan, 1100 + index);
-  }
-  work(session, 1);
-  complete(old.plan, old.task1.id, "任务1 的结果", 1200);
-  step(session, cursors, old.plan, 1200);
-  work(session, 1);
-  complete(old.plan, old.task2.id, "任务2 的结果", 1300);
-  step(session, cursors, old.plan, 1300);
-  work(session, 1);
-  complete(old.plan, old.goal.id, "目标的结果", 1400);
-  step(session, cursors, old.plan, 1400);
-
-  check("整棵树结束后三层游标都清空",
-    cursors.goal === null && cursors.task === null && cursors.step === null,
-    JSON.stringify(cursors));
-
-  const oldTail = session.live().at(-1);
-
-  // 用户提新需求，模型建了一棵新树（tree_task_create 替换计划）
-  const askSeq = session.append(
-    "user/message",
-    { content: [{ type: "text", text: "再加一件事" }] },
-    { surfaceOp: "append" },
-  ).seq;
-  const createCall = session.append(
-    "assistant/message",
-    { message: { content: [{ type: "tool-call", id: "c2", name: "tree_task_create", arguments: "{}" }] } },
-    { surfaceOp: "append" },
-  ).seq;
-  const createResult = session.append(
-    "tool/result",
-    { message: { content: [{ type: "tool-result", toolCallId: "c2", content: [{ type: "text", text: "计划已建立。" }] }] } },
-    { surfaceOp: "append" },
-  ).seq;
-
-  const fresh = createPlan({ title: "第二个目标", tasks: [{ title: "新任务" }] }, 2000);
-  step(session, cursors, fresh, 2000);
-  check("新目标的游标立在建树那一刻之后",
-    cursors.goal?.cursor === createResult,
-    `cursor=${cursors.goal?.cursor} want=${createResult}`);
-
-  // 新目标里拆一步、做完，看这次折叠收的是哪一段
-  const [newTask] = fresh.goals[0].tasks;
-  addChildren(fresh, newTask.id, [{ title: "新步骤" }], 2000);
-  work(session, 1);
-  step(session, cursors, fresh, 2000);
-  work(session, 1);
-  complete(fresh, newTask.steps[0].id, "新步骤的结果", 2100);
-  step(session, cursors, fresh, 2100);
-
-  const after = session.live();
-  const notice = after
-    .filter((seq) => textOf(session.eventAt(seq)).includes("已经完成，执行过程已归档"))
-    .at(-1);
-  check("旧目标的收尾通告还在表层上", after.includes(oldTail), `surface = ${JSON.stringify(after)}`);
-  check("用户的新需求还在表层上", after.includes(askSeq), `surface = ${JSON.stringify(after)}`);
-  check("新建树的那次调用也还在", after.includes(createCall) && after.includes(createResult));
-  check("新折叠只报新目标这一段的完成",
-    notice !== undefined &&
-      textOf(session.eventAt(notice)).includes("步骤「新步骤」") &&
-      !textOf(session.eventAt(notice)).includes("验证"),
-    `notice=${notice} text=${JSON.stringify(textOf(session.eventAt(notice ?? -1)).slice(0, 90))}`);
+  const range = foldRange(session);
+  check("起点退回节点 0 之后（系统提示词不能进替换区间）",
+    range !== null && range.from === 1, JSON.stringify(range));
+  check("区间里撞上真人消息，于是整段不折",
+    foldOnce(ctx, session) === false && countNotices(session) === 0);
+  check("真人消息完好", textOf(session.eventAt(session.live()[1])) === "帮我做件事");
 }
 
 // ---------------------------------------------------------------- 场景 9
 
-console.log("\n场景 9 · 目标层的兄弟折叠");
+console.log("\n场景 9 · 一轮只折一次，折完这一段就没了");
 {
-  const old = makeTree();
-  const second = addGoal(old.plan, { title: "第二个目标", tasks: [{ title: "新任务" }] }, 2000);
+  const session = makeSession();
+  boot(session);
+  create(session, "c1");
+  work(session, 2);
+  done(session, "d1");
 
-  complete(old.plan, old.step1.id, "子1 的结果", 1100);
-  complete(old.plan, old.step2.id, "子2 的结果", 1101);
-  complete(old.plan, old.step3.id, "子3 的结果", 1102);
-  complete(old.plan, old.task1.id, "任务1 的结果", 1200);
-  complete(old.plan, old.task2.id, "任务2 的结果", 1300);
-  complete(old.plan, old.goal.id, "第一个目标的结果", 1400);
-
-  const closed = closedFrom(old.plan, "goal", old.goal.id);
-  check("收的是已经结束的那个目标", closed.length === 1 && closed[0].id === old.goal.id,
-    JSON.stringify(closed.map((each) => each.id)));
-  check("后面还开着的目标不在里面", !closed.some((each) => each.id === second.id));
-  check("目标层用同一套兄弟逻辑", closedFrom(old.plan, "goal", second.id).length === 0);
+  check("第一次折成功", foldOnce(ctx, session) === true);
+  check("紧接着再折一次：区间已经没了，什么都不做",
+    foldOnce(ctx, session) === false && countNotices(session) === 1,
+    `surface = ${JSON.stringify(session.live())}`);
 }
 
 // ---------------------------------------------------------------- 场景 10
 
-console.log("\n场景 10 · 折叠范围只覆盖刚结束的那一段");
+console.log("\n场景 10 · 工具函数：foldRange 与 touchedFiles");
 {
-  const plan = createPlan(
-    { title: "目标", tasks: [{ title: "任务甲" }, { title: "任务乙" }, { title: "任务丙" }] },
-    1000,
-  );
-  const [taskA, taskB] = plan.goals[0].tasks;
-  addChildren(plan, taskA.id, [{ title: "A1" }], 1000);
-  addChildren(plan, taskB.id, [{ title: "B1" }], 1000);
-
   const session = makeSession();
   boot(session);
-  const cursors = newCursors(session.id);
-  step(session, cursors, plan, 1000);
+  create(session, "c1");
+  fileCall(session, "read", "C:/w/a.js", "r1");
+  fileCall(session, "write", "C:/w/b.js", "w1");
+  done(session, "d1");
 
-  // 任务甲：先做完 A1，再收尾甲
-  work(session, 2);
-  complete(plan, taskA.steps[0].id, "A1 的结果", 1100);
-  step(session, cursors, plan, 1100);
-  const foldA1 = session.live().at(-1);
-  const maskedA1 = session.eventAt(foldA1).sourceEventSeqs ?? [];
+  const range = foldRange(session);
+  const files = touchedFiles(session, range.shadowed);
+  check("touchedFiles 如实报出读与写",
+    files.read.length === 1 && files.read[0] === "C:/w/a.js" &&
+      files.write.length === 1 && files.write[0] === "C:/w/b.js",
+    JSON.stringify(files));
 
-  work(session, 2);
-  complete(plan, taskA.id, "甲的结果", 1200);
-  step(session, cursors, plan, 1200);
-  const foldTaskA = session.live().at(-1);
-  const maskedA = session.eventAt(foldTaskA).sourceEventSeqs ?? [];
+  check("折一次", foldOnce(ctx, session) === true);
+  check("折完之后，同一次调用之间再无可收的内容",
+    foldOnce(ctx, session) === false && countNotices(session) === 1,
+    `surface = ${JSON.stringify(session.live())}`);
+  check("落下的那条通告没有被后来这一次折掉",
+    lastNotice(session) !== null, `surface = ${JSON.stringify(session.live())}`);
 
-  // 任务乙：做完 B1
-  work(session, 2);
-  complete(plan, taskB.steps[0].id, "B1 的结果", 1300);
-  step(session, cursors, plan, 1300);
-  const foldB1 = session.live().at(-1);
-  const maskedB = session.eventAt(foldB1).sourceEventSeqs ?? [];
-
-  check("收尾任务甲时，只收甲这一段（含 A1 的汇总）",
-    maskedA.includes(foldA1),
-    JSON.stringify({ masked: maskedA, foldA1 }));
-  check("甲汇总自己的那次折叠不含它自己（游标留在范围外）",
-    !maskedA1.includes(foldA1) && maskedA1.length > 0,
-    JSON.stringify({ masked: maskedA1, foldA1 }));
-  check("轮到任务乙时，甲的汇总不在遮蔽清单里",
-    !maskedB.includes(foldTaskA),
-    JSON.stringify({ masked: maskedB, foldTaskA }));
-  check("甲的汇总仍然留在表层上", session.live().includes(foldTaskA));
-  check("乙的这次只收乙这一段（不含自己刚落下的通告）",
-    maskedB.length > 0 && !maskedB.includes(foldB1) && !maskedB.includes(foldTaskA),
-    JSON.stringify({ masked: maskedB, foldB1, foldTaskA }));
-}
-
-// ---------------------------------------------------------------- 场景 11
-
-console.log("\n场景 11 · 留着的那次 done 调用，下一轮就被收走");
-{
-  const { plan, step1, step2 } = makeTree();
-  const session = makeSession();
-  boot(session);
-  const cursors = newCursors(session.id);
-  step(session, cursors, plan, 1000);
-
-  /** 做一次 tree_task_done：假调用 + 完成 + 走一次 pre-step。 */
-  const doneOnce = (id, text, now) => {
-    work(session, 1);
-    const call = session.append(
-      "assistant/message",
-      { message: { content: [{ type: "tool-call", id: "call_1", name: "tree_task_done", arguments: "{}" }] } },
-      { surfaceOp: "append" },
-    ).seq;
-    const result = session.append(
-      "tool/result",
-      { message: { content: [{ type: "tool-result", toolCallId: "call_1", content: [] }] } },
-      { surfaceOp: "append" },
-    ).seq;
-    complete(plan, id, text, now);
-    step(session, cursors, plan, now);
-    return { call, result };
-  };
-
-  const first = doneOnce(step1.id, "子1 的结果", 1100);
-  check("第一次折叠后，这次调用与它的返回都还在",
-    session.live().includes(first.call) && session.live().includes(first.result),
-    `surface=${JSON.stringify(session.live())}`);
-
-  const second = doneOnce(step2.id, "子2 的结果", 1200);
-  const live = session.live();
-  const notice = live[live.indexOf(second.call) - 1];
-  const masked = session.eventAt(notice).sourceEventSeqs ?? [];
-  check("第二次折叠把上一轮留着的那次调用收走了",
-    masked.includes(first.call) && masked.includes(first.result),
-    JSON.stringify({ masked, first }));
-  check("当次这次调用仍然留在表层上",
-    session.live().includes(second.call) && session.live().includes(second.result),
-    `surface=${JSON.stringify(session.live())}`);
-  check("所以它们不会一轮轮累积下去",
-    !session.live().includes(first.call) && !session.live().includes(first.result));
+  const empty = makeSession();
+  empty.append("system/message", { message: { content: [{ type: "text", text: "系统提示词" }] } }, { surfaceOp: "append" });
+  check("表层只有系统提示词时返回 null", foldRange(empty) === null);
 }
 
 // ---------------------------------------------------------------- 汇总
