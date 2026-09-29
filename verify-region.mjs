@@ -1,17 +1,21 @@
 /**
  * region.js 的折叠行为自测。
  *
- * 钉住的规则只有一条，纯表层、与计划树无关：
+ * 钉住的规则（纯表层、与计划树无关）：
  *
- *   从上一个**边界调用**之后，到下一个 `tree_task_done` 之前，中间那一段过程收走。
- *   边界调用 = `tree_task_create` / `tree_task_plan` / `tree_task_done`。
+ *   起点 = 「上一次 `tree_task_done` 之后的第一个 `create` / `plan`」之后；
+ *   更早没有 done 时起点取表层第一个 create / plan，区间里一次 create / plan 都没有时
+ *   回退到上一次 done 之后。终点 = 本次 `tree_task_done` 的调用之前。
+ *   中间的 create / plan **不是切点**——它们连同过程一起收走。
+ *   判定表见 `docs/06-折叠范围规则.md`。
  *
- * 由此推出四件必须成立的事：
+ * 由此推出必须成立的事：
  *
- *   1. 边界调用的调用与返回都留在表层上（模型靠它们看计划与下一步）；
- *   2. 中间夹着真人消息就**整段不折**——往前折丢需求，往后折丢回应；
- *   3. 两次边界调用挨着（中间没有过程）就**什么都不注入**；
- *   4. 末尾最近的那次边界调用不是 done（比如刚调完 plan）就不折。
+ *   1. 起点那次调用、以及本次 done 的调用与返回都留在表层上；
+ *   2. 被跨过的 create / plan 的调用与返回随过程一起收走；
+ *   3. 中间夹着真人消息就**整段不折**——往前折丢需求，往后折丢回应；
+ *   4. 区间为空（create 与 done 紧邻、两次 done 紧邻）就**什么都不注入**；
+ *   5. 末尾最近的那次边界调用不是 done（比如刚调完 plan）就不折。
  *
  * 假 session 忠实复刻 DSH 的三条硬规则，否则测出来的东西不算数：
  *
@@ -174,7 +178,7 @@ function countNotices(session) {
 
 // ---------------------------------------------------------------- 场景 1
 
-console.log("\n场景 1 · 区间就是两次边界调用之间那一段");
+console.log("\n场景 1 · 起点取「上次 done 之后的第一个 create/plan」");
 {
   const session = makeSession();
   boot(session);
@@ -186,8 +190,8 @@ console.log("\n场景 1 · 区间就是两次边界调用之间那一段");
 
   const live = session.live();
   const range = foldRange(session);
-  check("区间起点在 plan 调用之后（连它的返回一起跳过）",
-    range !== null && range.from === live.indexOf(p.result) + 1,
+  check("区间起点在 create 返回之后（起点那次调用留在表层）",
+    range !== null && range.from === live.indexOf(c.result) + 1,
     `range=${JSON.stringify(range)} surface=${JSON.stringify(live)}`);
   check("区间终点在 done 调用之前",
     range !== null && range.to === live.indexOf(d.call) - 1,
@@ -197,13 +201,16 @@ console.log("\n场景 1 · 区间就是两次边界调用之间那一段");
   const after = session.live();
   const notice = lastNotice(session);
   check("确实折了", folded === true && notice !== null, JSON.stringify(after));
-  check("只报了 plan 与 done 之间那 6 条",
-    notice.text === "tree_task消息：隐藏了6条过程上下文。", JSON.stringify(notice.text));
-  check("create / plan / done 的调用与返回都还在",
-    [c, p, d].every((each) => after.includes(each.call) && after.includes(each.result)),
+  check("收走 create 与 done 之间的 12 条（过程 + plan + 过程）",
+    notice.text === "tree_task消息：隐藏了12条过程上下文。", JSON.stringify(notice.text));
+  check("create 与 done 的调用与返回都还在",
+    [c, d].every((each) => after.includes(each.call) && after.includes(each.result)),
     `surface = ${JSON.stringify(after)}`);
-  check("通告落在 plan 返回之后、done 调用之前",
-    after.indexOf(notice.seq) > after.indexOf(p.result) && after.indexOf(notice.seq) < after.indexOf(d.call),
+  check("被跨过的 plan 连同它的返回一起收走",
+    !after.includes(p.call) && !after.includes(p.result),
+    `surface = ${JSON.stringify(after)}`);
+  check("通告落在 create 返回之后、done 调用之前",
+    after.indexOf(notice.seq) > after.indexOf(c.result) && after.indexOf(notice.seq) < after.indexOf(d.call),
     `surface = ${JSON.stringify(after)}`);
 
   console.log("  surface:");
@@ -230,12 +237,34 @@ console.log("\n场景 2 · 末尾最近的那次边界调用不是 done 就不�
 
 // ---------------------------------------------------------------- 场景 3
 
-console.log("\n场景 3 · 两次边界调用挨着：什么都不注入");
+console.log("\n场景 3 · 边界调用挨着：create 与 done 之间只剩一次 plan 时，那次 plan 被收走");
+{
+  const session = makeSession();
+  boot(session);
+  const c = create(session, "c1");
+  const p = plan(session, "p1");
+  const d = done(session, "d1");
+
+  const range = foldRange(session);
+  check("起点是 create，不是中间的 plan",
+    range !== null && range.from === session.live().indexOf(p.call), `range=${JSON.stringify(range)}`);
+
+  const folded = foldOnce(ctx, session);
+  const after = session.live();
+  const notice = lastNotice(session);
+  check("折了那 2 条：plan 的调用与返回",
+    folded === true && notice?.text === "tree_task消息：隐藏了2条过程上下文。", JSON.stringify(notice?.text));
+  check("create 与 done 的调用与返回还在，plan 的不在了",
+    after.includes(c.call) && after.includes(c.result) && after.includes(d.call) && after.includes(d.result) &&
+      !after.includes(p.call) && !after.includes(p.result),
+    `surface = ${JSON.stringify(after)}`);
+}
+
+console.log("\n场景 3b · create 与 done 紧邻：区间为空，什么都不注入");
 {
   const session = makeSession();
   boot(session);
   create(session, "c1");
-  plan(session, "p1");
   done(session, "d1");
 
   const before = session.live();
@@ -395,6 +424,66 @@ console.log("\n场景 10 · 工具函数：foldRange 与 touchedFiles");
   const empty = makeSession();
   empty.append("system/message", { message: { content: [{ type: "text", text: "系统提示词" }] } }, { surfaceOp: "append" });
   check("表层只有系统提示词时返回 null", foldRange(empty) === null);
+}
+
+// ---------------------------------------------------------------- 场景 11
+
+console.log("\n场景 11 · 分阶段推进：上次 done 与下一个 create/plan 之间的过程不收");
+{
+  const session = makeSession();
+  boot(session);
+  const c = create(session, "c1");
+  work(session, 2);
+  const d1 = done(session, "d1");
+
+  check("阶段 A：折掉 create 之后那 4 条",
+    foldOnce(ctx, session) === true && lastNotice(session)?.text === "tree_task消息：隐藏了4条过程上下文。",
+    JSON.stringify(lastNotice(session)?.text));
+
+  work(session, 2);
+  const gap = session.live().slice(-4);
+  const p = plan(session, "p1");
+  work(session, 2);
+  const d2 = done(session, "d2");
+
+  const range = foldRange(session);
+  check("阶段 B：起点是刚才那次 plan，不是更早的 create",
+    range !== null && range.from === session.live().indexOf(p.result) + 1,
+    `range=${JSON.stringify(range)}`);
+
+  const folded = foldOnce(ctx, session);
+  const after = session.live();
+  check("阶段 B：收走 plan 之后那 4 条",
+    folded === true && lastNotice(session)?.text === "tree_task消息：隐藏了4条过程上下文。",
+    JSON.stringify(lastNotice(session)?.text));
+  check("上次 done 与这次 plan 之间的 4 条按规则不收，仍在表层",
+    gap.every((seq) => after.includes(seq)), `gap=${JSON.stringify(gap)} surface=${JSON.stringify(after)}`);
+  check("create / 两次 done / 这次 plan 的调用与返回都还在",
+    [c, d1, p, d2].every((each) => after.includes(each.call) && after.includes(each.result)),
+    `surface = ${JSON.stringify(after)}`);
+}
+
+// ---------------------------------------------------------------- 场景 12
+
+console.log("\n场景 12 · 两次 done 紧邻：区间为空，什么都不注入");
+{
+  const session = makeSession();
+  boot(session);
+  create(session, "c1");
+  work(session, 1);
+  done(session, "d1");
+
+  check("先折掉 create 之后那 2 条", foldOnce(ctx, session) === true && countNotices(session) === 1);
+
+  const d2 = done(session, "d2");
+  check("两次 done 之间没有过程：区间为空",
+    foldRange(session) === null, `surface = ${JSON.stringify(session.live())}`);
+  check("不折，也不再注入第二条通告",
+    foldOnce(ctx, session) === false && countNotices(session) === 1,
+    `surface = ${JSON.stringify(session.live())}`);
+  check("第二次 done 的调用与返回都还在",
+    session.live().includes(d2.call) && session.live().includes(d2.result),
+    `surface = ${JSON.stringify(session.live())}`);
 }
 
 // ---------------------------------------------------------------- 汇总

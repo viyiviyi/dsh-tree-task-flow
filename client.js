@@ -666,11 +666,24 @@ window.__ModuleLoader__.load({
 				return () => clearInterval(timer);
 			}, [sessionId, reload]);
 
+			// 这次操作的结果说明（已放行 / 已唤醒 / 为什么没动）：恢复失败时用户最需要
+			// 的就是这句话，不能只留在接口的返回里。
+			const [note, setNote] = useState(null);
+			useEffect(() => {
+				if (!note) return undefined;
+				const timer = setTimeout(() => setNote(null), 8000);
+				return () => clearTimeout(timer);
+			}, [note]);
+
 			const act = useCallback(
 				async (body) => {
 					setBusy(true);
+					setNote(null);
 					try {
-						await post(Object.assign({ sessionId }, body));
+						const result = await post(Object.assign({ sessionId }, body));
+						if (result && typeof result.message === "string" && result.message !== "") {
+							setNote(result.message);
+						}
 						await reload();
 					} finally {
 						setBusy(false);
@@ -747,6 +760,8 @@ window.__ModuleLoader__.load({
 							}),
 						),
 					),
+					// 这次操作的结果与原因（已放行 / 已唤醒 / 为什么没动）。
+					note ? h("div", { className: "dsh-ttf-note" }, note) : null,
 					open
 						? h(
 								"div",
