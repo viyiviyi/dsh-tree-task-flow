@@ -313,11 +313,6 @@ dsh plugin --profile web remove dsh-tree-task-flow
 
 状态目录不会自动清理，需要的话手动删 `$DSH_HOME/dsh-task-tree`。
 
-## 设计文档
-
-- `docs/02-DSH插件开发方案.md` —— 完整设计：上下文组成、折叠规则、检查点
-- `docs/01-AIDesktop联动设计整理.md` —— 本插件最初的设计来源
-
 ## 许可
 
 MIT
