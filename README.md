@@ -305,26 +305,6 @@ dsh --profile web --dump-config          # 输出里应出现 task-tree 这一�
 | 并行推进多个目标 | 结构上支持一个会话有多个目标（目标层就是兄弟列表），但同一时刻只沿一条活动路径走 |
 | 把计划内容注入提示词 | 计划状态由 `tree_task_status` 现取，提示词里只放不随计划变化的说明 |
 
-## 自检
-
-六个自检脚本都不 import 任何 `@deepseek-ai/*` 运行时包——插件以 `link:` 方式安装时，
-从插件目录往上找不到宿主作用域的包，一旦 import 就根本跑不起来。
-`verify-client.mjs` 因此自带一套最小的 `window` / `document` / React 替身，
-真去物化 `client.js`、真调一次 `apply`、真渲染一遍条目。
-
-```powershell
-node verify-entry.mjs     # 入口装配：默认（安装即启用）/ 显式关闭两条路径各注册了什么
-node verify-tools.mjs     # 工具层：schema、result 必填、三级约束
-node verify-region.mjs    # 折叠行为：游标推进、降级追加、检查点提示
-node verify-plan.mjs      # 计划树纯逻辑：状态流转、自动完成、丢弃级联
-node verify-pause.mjs     # 暂停闸门：挂起、放行、取消信号、真人发言、会话隔离
-node verify-client.mjs    # 客户端条目：挂载点、样式注入、文案键集、四种渲染态
-```
-
-`verify-region.mjs` 用假 session 忠实复刻了 DSH surface 的三条硬规则
-（替换保持位置、`sourceEventSeqs` 必须覆盖全部遮蔽节点、节点 0 重写约束），
-否则测出来的东西不算数。
-
 ## 卸载
 
 ```powershell
