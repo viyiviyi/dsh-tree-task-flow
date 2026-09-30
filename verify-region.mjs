@@ -428,7 +428,7 @@ console.log("\n场景 10 · 工具函数：foldRange 与 touchedFiles");
 
 // ---------------------------------------------------------------- 场景 11
 
-console.log("\n场景 11 · 分阶段推进：上次 done 与下一个 create/plan 之间的过程不收");
+console.log("\n场景 11 · 分阶段推进：plan 不是边界，上次 done 之后的整段一起收");
 {
   const session = makeSession();
   boot(session);
@@ -447,19 +447,55 @@ console.log("\n场景 11 · 分阶段推进：上次 done 与下一个 create/pl
   const d2 = done(session, "d2");
 
   const range = foldRange(session);
-  check("阶段 B：起点是刚才那次 plan，不是更早的 create",
-    range !== null && range.from === session.live().indexOf(p.result) + 1,
+  check("阶段 B：起点回退到上次 done 的返回之后（区间里没有 create）",
+    range !== null && range.from === session.live().indexOf(d1.result) + 1,
+    `range=${JSON.stringify(range)}`);
+  check("阶段 B：区间覆盖 plan 的调用与返回",
+    range !== null && range.shadowed.includes(p.call) && range.shadowed.includes(p.result),
     `range=${JSON.stringify(range)}`);
 
   const folded = foldOnce(ctx, session);
   const after = session.live();
-  check("阶段 B：收走 plan 之后那 4 条",
-    folded === true && lastNotice(session)?.text === "tree_task消息：隐藏了4条过程上下文。",
+  check("阶段 B：收走 10 条（上次 done 之后的 4 条过程 + plan 的调用与返回 + 后面 4 条）",
+    folded === true && lastNotice(session)?.text === "tree_task消息：隐藏了10条过程上下文。",
     JSON.stringify(lastNotice(session)?.text));
-  check("上次 done 与这次 plan 之间的 4 条按规则不收，仍在表层",
-    gap.every((seq) => after.includes(seq)), `gap=${JSON.stringify(gap)} surface=${JSON.stringify(after)}`);
-  check("create / 两次 done / 这次 plan 的调用与返回都还在",
-    [c, d1, p, d2].every((each) => after.includes(each.call) && after.includes(each.result)),
+  check("上次 done 与这次 plan 之间的 4 条也一起收走了",
+    gap.every((seq) => !after.includes(seq)), `gap=${JSON.stringify(gap)} surface=${JSON.stringify(after)}`);
+  check("create 与两次 done 的调用与返回都还在，plan 的不在了",
+    [c, d1, d2].every((each) => after.includes(each.call) && after.includes(each.result)) &&
+      !after.includes(p.call) && !after.includes(p.result),
+    `surface = ${JSON.stringify(after)}`);
+}
+
+// ---------------------------------------------------------------- 场景 13
+
+console.log("\n场景 13 · done → 过程 → plan → 过程 → done：plan 随过程一起收走");
+{
+  const session = makeSession();
+  boot(session);
+  const d1 = done(session, "d1");
+  work(session, 1);
+  const p = plan(session, "p1");
+  work(session, 1);
+  const d2 = done(session, "d2");
+
+  const range = foldRange(session);
+  check("区间从上次 done 的返回之后开始",
+    range !== null && range.from === session.live().indexOf(d1.result) + 1,
+    `range=${JSON.stringify(range)}`);
+  check("区间把 plan 的调用与返回都罩住了（假 session 的 replace 校验要求 sourceEventSeqs 全覆盖）",
+    range !== null && range.shadowed.includes(p.call) && range.shadowed.includes(p.result),
+    `range=${JSON.stringify(range)}`);
+
+  const folded = foldOnce(ctx, session);
+  const after = session.live();
+  check("收走 6 条：过程 2 + plan 的调用与返回 2 + 过程 2",
+    folded === true && lastNotice(session)?.text === "tree_task消息：隐藏了6条过程上下文。",
+    JSON.stringify(lastNotice(session)?.text));
+  check("plan 的调用与返回不在表层了",
+    !after.includes(p.call) && !after.includes(p.result), `surface = ${JSON.stringify(after)}`);
+  check("两次 done 的调用与返回都还在",
+    [d1, d2].every((each) => after.includes(each.call) && after.includes(each.result)),
     `surface = ${JSON.stringify(after)}`);
 }
 

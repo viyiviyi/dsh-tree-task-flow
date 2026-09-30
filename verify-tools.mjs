@@ -183,8 +183,8 @@ console.log("\n场景 2 · 完成必须交出 result");
     JSON.stringify(good.text).slice(0, 160),
   );
   check(
-    "tree_task_done 的说明里讲了返回内容与调用会留下",
-    /返回内容就是下一步/u.test(done.description) && /留在上下文里/u.test(done.description),
+    "tree_task_done 的说明里讲了这次调用与返回都留在上下文里",
+    /这次调用与它的返回都会留在上下文里/u.test(done.description),
     done.description,
   );
 
