@@ -132,7 +132,7 @@ tree_task消息：接下来需要进行步骤：「步骤二」(s-4)。
 
 **从 npm 安装**：
 
-```powershell
+```bash
 dsh plugin --profile web add dsh-tree-task-flow
 ```
 
