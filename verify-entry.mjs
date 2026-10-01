@@ -191,16 +191,28 @@ check(
 check("文本不再声称检查点会拒绝别的工具", !/一律被拒|只放行/u.test(SECTION_TEXT));
 check("文本不再讲资料注入", !/资料注入|注入资料/u.test(SECTION_TEXT));
 check(
-  "提示词教了分层：目标、任务交付节点、任务执行步骤三级",
+  "提示词教了分层：目标、任务、任务执行步骤三级",
   SECTION_TEXT.includes("目标") &&
-    SECTION_TEXT.includes("任务交付节点") &&
-    SECTION_TEXT.includes("任务执行步骤") &&
-    SECTION_TEXT.includes("三级"),
+    SECTION_TEXT.includes("任务、任务执行步骤三级") &&
+    !SECTION_TEXT.includes("任务交付节点"),
+);
+check(
+  "提示词给了两级拆分口径（任务按可独立交付分、步骤按一次性处理分）",
+  SECTION_TEXT.includes("可独立交付的节点分为多个任务") &&
+    SECTION_TEXT.includes("任务节点需要准确表述清楚需求") &&
+    SECTION_TEXT.includes("需一次性处理并交付产物") &&
+    SECTION_TEXT.includes("分为多个步骤"),
 );
 check(
   "提示词讲了 result 写什么",
   SECTION_TEXT.includes("result") &&
+    SECTION_TEXT.includes("提交内容可以是") &&
     ["产物", "结论", "问题"].every((want) => SECTION_TEXT.includes(want)),
+);
+check(
+  "提示词说明了过程上下文的下场（完成时被隐藏）",
+  SECTION_TEXT.includes("执行过程上下文将会在完成时被隐藏") &&
+    !SECTION_TEXT.includes("并自动收缩上下文"),
 );
 check(
   "段落是动作导向的：不解释机制、不定义概念",

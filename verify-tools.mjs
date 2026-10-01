@@ -133,6 +133,16 @@ console.log("\n场景 1 · 六个工具的注册表与 schema");
     /交付节点/u.test(created.description) && /步骤/u.test(planTool.description),
   );
   check(
+    "create 描述说清任务可以是什么：交付内容，也可以是检查点",
+    /能独立验收的交付内容/u.test(created.description) &&
+      /检查点/u.test(created.description) &&
+      !/交付物/u.test(created.description),
+  );
+  check(
+    "create 描述提醒建完给第一个任务拆子任务",
+    /tree_task_plan/u.test(created.description) && /第一个任务/u.test(created.description),
+  );
+  check(
     "tree_task_done 的 result 说明按两层分别写了写法",
     /验收/u.test(done.description) && /验收/u.test(done.parameters.properties.result.description),
   );
