@@ -247,8 +247,8 @@ check(
 console.log("\n监听面：");
 check("不挂 tools/pre-execute（插件不拦任何别的工具）", !on.handlers.has("tools/pre-execute"));
 check(
-  "pre-step 上正好三个监听（折叠 + 续行 + 暂停闸门）",
-  (on.handlers.get("agent/pre-step") ?? []).length === 3,
+  "pre-step 上正好四个监听（压缩提示 + 折叠 + 续行 + 暂停闸门）",
+  (on.handlers.get("agent/pre-step") ?? []).length === 4,
   String((on.handlers.get("agent/pre-step") ?? []).length),
 );
 check("挂了停止信号监听", on.handlers.has("agent/turn-stopping"));
@@ -328,8 +328,8 @@ check(
 );
 check("不给 config 也加一段提示词", bare.sections.length === 1, String(bare.sections.length));
 check(
-  "不给 config 也挂 pre-step（折叠 + 续行 + 暂停闸门）",
-  (bare.handlers.get("agent/pre-step") ?? []).length === 3,
+  "不给 config 也挂 pre-step（压缩提示 + 折叠 + 续行 + 暂停闸门）",
+  (bare.handlers.get("agent/pre-step") ?? []).length === 4,
   String((bare.handlers.get("agent/pre-step") ?? []).length),
 );
 check("不给 config 也挂了停止信号监听", bare.handlers.has("agent/turn-stopping"));
