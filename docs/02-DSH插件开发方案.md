@@ -353,12 +353,16 @@ margin:       0 auto
 `chat-content-width` 从会话列宽动态算出，窗口缩放时会跟着正文一起变。
 
 **外观照内置来，不另起一套。** 图标、图标按钮的悬停提示直接用外壳播种的 UI 基座
-`@deepseek-ai/dsh-client-ui-primitives`（`IconChecklistOutline14`、`IconPauseOutline16`、
-`IconPlayOutline16`、`IconTrashOutline16`、`IconChevronUp/DownOutline14`、`Tooltip`），
+`@deepseek-ai/dsh-client-ui-primitives`（`IconChecklistOutline`、`IconPauseOutline`、
+`IconPlayOutline`、`IconTrashOutline`、`IconChevronUpOutline` / `IconChevronDownOutline`、
+`Tooltip`）。基座把图标名的后缀换过一次：旧外壳把尺寸写进名字（`IconCheckOutline16`），
+升级后的外壳换成笔画粗细（`IconCheckOutlineRegular` / `IconCheckOutlineMedium`，尺寸改由
+`size` 属性给）。客户端按「尺寸后缀 → 粗细后缀 → 裸名」依次找，两套外壳都取得回图标。
 尺寸（36px 条、28×28 圆钮、14/16px 图标）与颜色全取 `--dsw-*` 那一套变量。
 类名统一 `dsh-ttf-` 前缀，避开内置 CSS Modules 的哈希名；样式表在 factory 里拼成字符串，
 插一个带 `data-plugin-css` 的 `<style>` 标签——与内置客户端插件同一条路径，
-卸载时由客户端 HMR 收走。取不到图标时按钮退回显示短文字，不会变成点不着的空白格。
+卸载时由客户端 HMR 收走。取不到图标时按钮退回显示短文字：这时按钮按文字宽度自己撑开
+（上限 112px，超出用省略号收住），不会挤在固定的 28px 里压成一团。
 
 - **收起** = 目标条（GoalBar）那样的一行：清单图标 + 阶段标签 + 目标标题 +
   `已完成/总数 · 当前节点` + 右侧一排图标按钮（暂停或继续、清空、展开箭头）。

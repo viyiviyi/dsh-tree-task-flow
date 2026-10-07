@@ -61,10 +61,27 @@ window.__ModuleLoader__.load({
 			primitives = {};
 		}
 
+		/**
+		 * 内置图标名有两套写法，这里两套都认。
+		 *
+		 * 旧外壳把尺寸写进名字：`IconCheckOutline16`、`IconChevronDownOutline14`；
+		 * 升级后的外壳把名字里的尺寸换成笔画粗细：`IconCheckOutlineRegular`、
+		 * `IconCheckOutlineMedium`，尺寸改由 `size` 属性给。按「尺寸后缀 → 粗细后缀
+		 * → 裸名」的顺序找，两套外壳都取得回图标，不会平白降级成文字。
+		 */
+		function findIcon(base, size) {
+			const candidates = [base + size, base + "14", base + "16", base + "Regular", base + "Medium", base];
+			for (const candidate of candidates) {
+				const component = primitives[candidate];
+				if (typeof component === "function") return component;
+			}
+			return null;
+		}
+
 		/** 取一个内置图标；这版外壳没有就返回 null，由调用方决定怎么退。 */
-		function icon(iconName, size) {
-			const component = primitives[iconName];
-			if (typeof component !== "function") return null;
+		function icon(base, size) {
+			const component = findIcon(base, size);
+			if (component === null) return null;
 			return h(component, { size });
 		}
 
@@ -75,16 +92,21 @@ window.__ModuleLoader__.load({
 			return h(Tooltip, { label, side: "bottom", delayMs: 500 }, node);
 		}
 
-		/** 图标按钮：有图标用图标，没图标退回短文字，保证永远点得到。 */
-		function IconButton({ iconName, label, disabled, onClick }) {
-			const glyph = icon(iconName, 16);
+		/**
+		 * 图标按钮：有图标用图标，没图标退回短文字，保证永远点得到。
+		 *
+		 * 退回文字时换成 `dsh-ttf-iconBtnText`：按钮按文字宽度自己撑开、文字长了
+		 * 用省略号收住，所以并排的几个按钮不会挤成一团互相压。
+		 */
+		function IconButton({ iconBase, label, size, disabled, onClick }) {
+			const glyph = icon(iconBase, typeof size === "number" ? size : 16);
 			return withTooltip(
 				label,
 				h(
 					"button",
 					{
 						type: "button",
-						className: "dsh-ttf-iconBtn",
+						className: glyph === null ? "dsh-ttf-iconBtn dsh-ttf-iconBtnText" : "dsh-ttf-iconBtn",
 						disabled: disabled === true,
 						"aria-label": label,
 						onClick,
@@ -307,16 +329,21 @@ window.__ModuleLoader__.load({
 			'.dsh-ttf-panel:after{border:.5px solid var(--dsw-alias-border-l1);border-radius:inherit;content:"";pointer-events:none;position:absolute;inset:0}',
 			".dsh-ttf-bar{box-sizing:border-box;width:100%;height:36px;display:flex;align-items:center;gap:10px;padding:4px 5px 4px 12px}",
 			".dsh-ttf-glyph{color:var(--dsw-alias-label-tertiary);flex:none;display:inline-flex;align-items:center}",
+			".dsh-ttf-glyphFallback{font-size:13px;line-height:16px}",
 			".dsh-ttf-label{color:var(--dsw-alias-label-primary);flex:none;font-size:13px;font-weight:500;line-height:24px;white-space:nowrap}",
 			".dsh-ttf-labelHeld{color:var(--dsw-alias-state-warning-primary,#a06800)}",
 			".dsh-ttf-title{min-width:0;flex:1;color:var(--dsw-alias-label-primary-dimmed);font-size:13px;line-height:20px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
 			".dsh-ttf-progress{flex:none;max-width:45%;min-width:0;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:20px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
 			".dsh-ttf-actions{flex:none;display:flex;align-items:center;gap:2px}",
-			".dsh-ttf-iconBtn{corner-shape:round;width:28px;height:28px;border:none;background:0 0;border-radius:999px;color:var(--dsw-alias-label-tertiary);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0;font:inherit}",
+			".dsh-ttf-iconBtn{corner-shape:round;width:28px;height:28px;border:none;background:0 0;border-radius:999px;color:var(--dsw-alias-label-tertiary);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0;font:inherit;flex:none}",
 			".dsh-ttf-iconBtn:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}",
 			".dsh-ttf-iconBtn:disabled{opacity:.4;cursor:default}",
 			".dsh-ttf-iconBtn:disabled:hover{background:0 0;color:var(--dsw-alias-label-tertiary)}",
-			".dsh-ttf-iconText{font-size:12px;line-height:16px;padding:0 4px;white-space:nowrap}",
+			// 取不到内置图标时退回文字：固定 28px 宽装不下几个字，文字会溢出到相邻
+			// 按钮上，看着就是几个按钮叠在一起。这里按文字宽度撑开、留出边距，
+			// 并给一个上限，长了用省略号收住——几个按钮始终各占各的位置。
+			".dsh-ttf-iconBtnText{width:auto;min-width:28px;max-width:112px;height:24px;padding:0 8px}",
+			".dsh-ttf-iconText{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;font-size:12px;line-height:16px;white-space:nowrap}",
 			// 展开体：限高滚动——这是输入框旁边的位置，不能让它把会话挤没了。
 			".dsh-ttf-body{max-height:264px;overflow-y:auto;padding:2px 8px 8px}",
 			".dsh-ttf-note{margin:4px 4px 6px;padding:6px 8px;border-radius:8px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-module-platform)}",
@@ -388,11 +415,11 @@ window.__ModuleLoader__.load({
 		 */
 		function StatusMark({ node, isCurrent }) {
 			if (node.status === "done") {
-				const check = icon("IconCheckOutline14", 14);
+				const check = icon("IconCheckOutline", 14);
 				return h("span", { className: "dsh-ttf-markDone" }, check === null ? "✓" : check);
 			}
 			if (node.status === "dropped") {
-				const close = icon("IconCloseOutline16", 14);
+				const close = icon("IconCloseOutline", 14);
 				return h("span", { className: "dsh-ttf-markMuted" }, close === null ? "×" : close);
 			}
 			const circle = { cx: 7, cy: 7, r: 5.2, stroke: "currentColor", strokeWidth: 1.2 };
@@ -536,7 +563,7 @@ window.__ModuleLoader__.load({
 						{ className: "dsh-ttf-rowActions" },
 						canAct
 							? h(IconButton, {
-									iconName: "IconCheckOutline16",
+									iconBase: "IconCheckOutline",
 									label: t("action.done"),
 									disabled: busy,
 									onClick: () => {
@@ -547,7 +574,7 @@ window.__ModuleLoader__.load({
 							: null,
 						canAct && canDrop
 							? h(IconButton, {
-									iconName: "IconTrashOutline16",
+									iconBase: "IconTrashOutline",
 									label: t("action.drop"),
 									disabled: busy,
 									onClick: () => {
@@ -559,7 +586,7 @@ window.__ModuleLoader__.load({
 							: null,
 						expandable
 							? h(IconButton, {
-									iconName: open ? "IconChevronDownOutline14" : "IconChevronRightOutline14",
+									iconBase: open ? "IconChevronDownOutline" : "IconChevronRightOutline",
 									label: open ? t("action.collapse") : t("action.expand"),
 									onClick: () => setOpen(!open),
 								})
@@ -718,6 +745,10 @@ window.__ModuleLoader__.load({
 					: data.active === null
 						? t("state.done")
 						: t("state.running");
+			// 条首的清单图标；外壳连这个图标都没有时退回一个同类字符，别留空白。
+			const listIcon = icon("IconChecklistOutline", 14);
+			const listGlyph =
+				listIcon === null ? h("span", { className: "dsh-ttf-glyphFallback" }, "☰") : listIcon;
 
 			return h(
 				"div",
@@ -728,7 +759,7 @@ window.__ModuleLoader__.load({
 					h(
 						"div",
 						{ className: "dsh-ttf-bar" },
-						h("span", { className: "dsh-ttf-glyph", "aria-hidden": true }, icon("IconChecklistOutline14", 14)),
+						h("span", { className: "dsh-ttf-glyph", "aria-hidden": true }, listGlyph),
 						h("span", { className: "dsh-ttf-label" + (held ? " dsh-ttf-labelHeld" : "") }, stateLabel),
 						h("span", { className: "dsh-ttf-title", title: heading }, heading),
 						h(
@@ -740,13 +771,13 @@ window.__ModuleLoader__.load({
 							"div",
 							{ className: "dsh-ttf-actions" },
 							h(IconButton, {
-								iconName: held ? "IconPlayOutline16" : "IconPauseOutline16",
+								iconBase: held ? "IconPlayOutline" : "IconPauseOutline",
 								label: held ? t("action.resume") : t("action.pause"),
 								disabled: busy,
 								onClick: () => act({ action: held ? "resume" : "pause" }),
 							}),
 							h(IconButton, {
-								iconName: "IconTrashOutline16",
+								iconBase: "IconTrashOutline",
 								label: t("action.reset"),
 								disabled: busy,
 								onClick: () => {
@@ -754,7 +785,7 @@ window.__ModuleLoader__.load({
 								},
 							}),
 							h(IconButton, {
-								iconName: open ? "IconChevronDownOutline14" : "IconChevronUpOutline14",
+								iconBase: open ? "IconChevronDownOutline" : "IconChevronUpOutline",
 								label: open ? t("action.collapse") : t("action.expand"),
 								onClick: () => setOpen(!open),
 							}),

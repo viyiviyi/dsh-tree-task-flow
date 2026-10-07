@@ -166,30 +166,47 @@ await import(pathToFileURL(join(HERE, "client.js")).href);
 
 check("以 dsh-tree-task-flow 注册", captured !== null && captured.id === "dsh-tree-task-flow", String(captured && captured.id));
 
-const ICONS = [
-  "IconChecklistOutline14",
-  "IconChevronDownOutline14",
-  "IconChevronRightOutline14",
-  "IconChevronUpOutline14",
-  "IconCheckOutline14",
-  "IconCheckOutline16",
-  "IconCloseOutline16",
-  "IconPauseOutline16",
-  "IconPlayOutline16",
-  "IconTrashOutline16",
+/**
+ * 升级后的外壳：图标名后缀是笔画粗细（`IconCheckOutlineRegular`），尺寸走
+ * `size` 属性。每个假图标把自己被取到时的名字记在 `data-icon` 上，好断言
+ * 「真的取到了图标」而不是退了文字。
+ */
+const ICON_BASES = [
+  "IconChecklistOutline",
+  "IconChevronDownOutline",
+  "IconChevronRightOutline",
+  "IconChevronUpOutline",
+  "IconCheckOutline",
+  "IconCloseOutline",
+  "IconPauseOutline",
+  "IconPlayOutline",
+  "IconTrashOutline",
 ];
 
 const primitives = {};
-for (const iconName of ICONS) {
-  primitives[iconName] = () => makeElement("i", { "data-icon": iconName });
+for (const base of ICON_BASES) {
+  for (const suffix of ["Regular", "Medium"]) {
+    primitives[base + suffix] = () => makeElement("i", { "data-icon": base + suffix });
+  }
 }
 primitives.Tooltip = (props) => props.children;
+
+/** 旧外壳：同一个图标，名字里带的是尺寸（`IconCheckOutline16` 这种）。 */
+const legacyPrimitives = {};
+for (const base of ICON_BASES) {
+  for (const suffix of ["14", "16"]) {
+    legacyPrimitives[base + suffix] = () => makeElement("i", { "data-icon": base + suffix });
+  }
+}
+legacyPrimitives.Tooltip = (props) => props.children;
+
+let currentPrimitives = primitives;
 
 const requested = [];
 function fakeRequire(spec) {
   requested.push(spec);
   if (spec === "react") return miniReact;
-  if (spec === "@deepseek-ai/dsh-client-ui-primitives") return primitives;
+  if (spec === "@deepseek-ai/dsh-client-ui-primitives") return currentPrimitives;
   throw new Error("client.js 请求了没准备的模块：" + spec);
 }
 
@@ -294,6 +311,7 @@ for (const cls of [
   ".dsh-ttf-panel",
   ".dsh-ttf-bar",
   ".dsh-ttf-iconBtn",
+  ".dsh-ttf-iconBtnText",
   ".dsh-ttf-label",
   ".dsh-ttf-progress",
   ".dsh-ttf-body",
@@ -391,7 +409,7 @@ const collapsed = renderDock(DATA, false);
 check("渲染出条目外壳", hasClass(collapsed, "dsh-ttf-dock"));
 check("渲染出卡片", hasClass(collapsed, "dsh-ttf-panel"));
 check("渲染出单行条", hasClass(collapsed, "dsh-ttf-bar"));
-check("左侧是清单图标", hasIcon(collapsed, "IconChecklistOutline14"));
+check("左侧是清单图标", hasIcon(collapsed, "IconChecklistOutlineRegular"));
 check("状态标签是「进行中」", hasText(collapsed, "进行中"));
 check("显示目标标题", hasText(collapsed, "示例目标"));
 check("显示进度与当前节点", hasText(collapsed, "1/3") && hasText(collapsed, "任务一"));
@@ -405,7 +423,11 @@ check(
   findAll(collapsed, (node) => classOf(node).includes("dsh-ttf-iconBtn")).length === 3,
   String(findAll(collapsed, (node) => classOf(node).includes("dsh-ttf-iconBtn")).length),
 );
-check("暂停按钮用的是内置图标", hasIcon(collapsed, "IconPauseOutline16"));
+check("暂停按钮用的是内置图标", hasIcon(collapsed, "IconPauseOutlineRegular"));
+check(
+  "图标取得到时按钮里没有退化的文字",
+  findAll(collapsed, (node) => classOf(node).includes("dsh-ttf-iconText")).length === 0,
+);
 
 console.log("\n展开态（卡片）：");
 const expanded = renderDock(DATA, true);
@@ -573,7 +595,7 @@ const paused = renderDock(Object.assign({}, DATA, { paused: true }), true);
 check("状态标签变「已暂停」", hasText(paused, "已暂停"));
 check("出现「继续」按钮", byAria(paused, "继续").length === 1, String(byAria(paused, "继续").length));
 check("不再有「暂停」按钮", byAria(paused, "暂停").length === 0);
-check("继续按钮用的是内置播放图标", hasIcon(paused, "IconPlayOutline16"));
+check("继续按钮用的是内置播放图标", hasIcon(paused, "IconPlayOutlineRegular"));
 check("给出暂停说明", hasText(paused, "点「继续」从原处接着跑"));
 
 console.log("\n停止态与空态：");
@@ -591,6 +613,57 @@ console.log("\n客户端源码约定：");
 check("仍以手写模块格式加载", SOURCE.includes("window.__ModuleLoader__.load("));
 check("没有走 JSX（不出现 React.createElement 之外的编译产物）", !SOURCE.includes("react/jsx-runtime"));
 check("不再用「停止自动续行」这套旧文案", !SOURCE.includes("btn.stop") && !SOURCE.includes("state.stopped"));
+
+// ------------------------------------------------- 换一套外壳再物化一遍
+
+/**
+ * 图标名在外壳升级时改过一次（尺寸后缀 → 笔画后缀）。上面测的是新版外壳，
+ * 这里换回旧版外壳与「一个图标都没有」的外壳各物化一遍，确认这两条路都走得通。
+ * client.js 是模块脚本，按 URL 缓存，所以换场景时给 URL 挂一个不同的 query。
+ */
+const CLIENT_URL = pathToFileURL(join(HERE, "client.js")).href;
+
+async function remount(shell, tag) {
+  styleTags.length = 0;
+  captured = null;
+  currentPrimitives = shell;
+  await import(CLIENT_URL + "?" + tag);
+  const plugin = captured.factory(fakeRequire);
+  plugin.apply(ctx);
+  return plugin;
+}
+
+console.log("\n旧外壳（图标名里带尺寸）：");
+await remount(legacyPrimitives, "legacy-shell");
+
+const legacyCollapsed = renderDock(DATA, false);
+check("条首仍取得到清单图标", hasIcon(legacyCollapsed, "IconChecklistOutline14"));
+check("动作按钮仍取得到图标", hasIcon(legacyCollapsed, "IconPauseOutline16"));
+check(
+  "按钮里没有退化的文字",
+  findAll(legacyCollapsed, (node) => classOf(node).includes("dsh-ttf-iconText")).length === 0,
+);
+
+console.log("\n外壳一个图标都没有（退回文字）：");
+await remount({ Tooltip: (props) => props.children }, "no-icons");
+
+const plainDock = renderDock(DATA, false);
+const textButtons = findAll(plainDock, (node) => classOf(node).includes("dsh-ttf-iconBtnText"));
+check("三个动作按钮都退回文字", textButtons.length === 3, String(textButtons.length));
+check(
+  "文字按钮按文字宽度撑开（不再是固定 28px 宽）",
+  SOURCE.includes(".dsh-ttf-iconBtnText{width:auto;min-width:28px;max-width:112px;"),
+);
+check(
+  "文字超长用省略号收住，压不到相邻按钮",
+  SOURCE.includes(".dsh-ttf-iconText{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;"),
+);
+check("条首换成同类字符，不留空白", hasClass(plainDock, "dsh-ttf-glyphFallback"));
+check(
+  "退回文字后每个按钮仍认得出是哪个动作",
+  byAria(plainDock, "暂停").length === 1 && byAria(plainDock, "清空计划").length === 1 && byAria(plainDock, "展开").length === 1,
+);
+check("换外壳渲染也没有取到不存在的文案键", missingKeys.length === 0, missingKeys.join(", "));
 
 // ---------------------------------------------------------------- 汇总
 
