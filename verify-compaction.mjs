@@ -5,13 +5,16 @@
  *
  *   1. 只有「这个会话有计划树」且「表层里出现了压缩检查点」才提示；
  *   2. 同一个检查点只提示一次，再压缩一次才会再提示；
- *   3. 提示与折叠通告同形：`tree_task消息：` 开头、plugin/notice 形态、带 surfaceOp；
+ *   3. 提示与折叠通告同形：`tree_task消息：` 开头、notice 形态、带 surfaceOp；
  *   4. 拒绝、中止、没有会话时一律不动；
- *   5. 注入失败不往外抛，也不推进去重位置（下一轮还能再试）。
+ *   5. 注入失败不往外抛，也不推进去重位置（下一轮还能再试）；
+ *   6. **检查点的两种 source 形状都要认**：v4 原生的
+ *      `{ kind: "compact-checkpoint" }` 与 v3 迁移前的老写法
+ *      `{ kind: "plugin", plugin: "compact" }`。
  *
- * 认的是**表层里那条** `user/message`（source 为 `plugin: "compact"`），
- * 不是 `compaction/summary` 事件——后者不带 surfaceOp，根本不在表层里。
- * 假 session 因此会同时提供这两种形态，用来证明"只认对的那一种"。
+ * 认的是**表层里那条** `user/message`，不是 `compaction/summary` 事件——后者不带
+ * surfaceOp，根本不在表层里。假 session 因此会同时提供这两种形态，用来证明
+ * "只认对的那一种"。
  *
  * 跑：node verify-compaction.mjs
  */
@@ -29,6 +32,15 @@ function check(name, cond, detail) {
     failures.push(detail ? `${name} — ${detail}` : name);
     console.log(`  FAIL  ${name}${detail ? ` — ${detail}` : ""}`);
   }
+}
+
+/** 这条表层事件是不是本插件注下的通告（v4 新写法与 v3 老写法都算）。 */
+function isOurs(event) {
+  if (event?.type !== "user/message") return false;
+  const source = event.data?.source;
+  if (source === undefined || source === null) return false;
+  if (source.kind === "plugin:dsh-tree-task-flow") return true;
+  return source.kind === "plugin" && source.plugin === "dsh-tree-task-flow";
 }
 
 const warnings = [];
@@ -93,11 +105,14 @@ function makeSession(id) {
       return seq;
     },
     /** 测试用：放一个压缩检查点（表层里那条 user/message）。 */
-    addCompactionCheckpoint(compactionId = "c-1") {
+    addCompactionCheckpoint(compactionId = "c-1", { legacy = false } = {}) {
       const seq = put("user/message", {
         role: "user",
         content: [{ type: "text", text: "This is an automatically generated checkpoint …" }],
-        source: { kind: "plugin", plugin: "compact", compactionId },
+        // v4 原生形状是 { kind: "compact-checkpoint", … }；legacy 走迁移前的老写法。
+        source: legacy
+          ? { kind: "plugin", plugin: "compact", compactionId }
+          : { kind: "compact-checkpoint", compactionId },
       }, { surfaceOp: { op: "replace", startSeq: 0, endSeq: 0 } });
       nodes.push(seq);
       return seq;
@@ -113,7 +128,11 @@ function makeSession(id) {
     hideCompaction() {
       for (let index = nodes.length - 1; index >= 0; index -= 1) {
         const event = events[nodes[index]];
-        if (event?.type === "user/message" && event.data?.source?.plugin === "compact") {
+        const source = event?.data?.source;
+        if (
+          event?.type === "user/message" &&
+          (source?.kind === "compact-checkpoint" || (source?.kind === "plugin" && source.plugin === "compact"))
+        ) {
           nodes.splice(index, 1);
         }
       }
@@ -121,16 +140,10 @@ function makeSession(id) {
     live: () => [...nodes],
     /** 本插件注入的提示条数。 */
     noticeCount() {
-      return nodes.filter((seq) => {
-        const event = events[seq];
-        return event?.type === "user/message" && event.data?.source?.plugin === "dsh-tree-task-flow";
-      }).length;
+      return nodes.filter((seq) => isOurs(events[seq])).length;
     },
     lastNotice() {
-      const seqs = nodes.filter((seq) => {
-        const event = events[seq];
-        return event?.type === "user/message" && event.data?.source?.plugin === "dsh-tree-task-flow";
-      });
+      const seqs = nodes.filter((seq) => isOurs(events[seq]));
       return seqs.length === 0 ? null : events[seqs[seqs.length - 1]];
     },
   };
@@ -218,8 +231,18 @@ check("有压缩检查点时提示一次", session.noticeCount() === 1, `条数=
 const notice = session.lastNotice();
 check("提示以 tree_task消息： 开头", textOf(notice).startsWith("tree_task消息："), textOf(notice).slice(0, 30));
 check("提示里点名 tree_task_status", textOf(notice).includes("tree_task_status"));
-check("提示的 source.kind 是 plugin", notice?.data?.source?.kind === "plugin");
-check("提示的 source.plugin 是本插件", notice?.data?.source?.plugin === "dsh-tree-task-flow");
+// v4 会话按原生准入校验 source：kind 必须是生产者自有的（非空、且不等于 "plugin"）。
+// 老写法在 v4 里会被 encodeEvent 直接拒掉，报 "format v4 message requires a producer-owned source kind"。
+check(
+  "提示的 source.kind 是生产者自有的 plugin:dsh-tree-task-flow",
+  notice?.data?.source?.kind === "plugin:dsh-tree-task-flow",
+  String(notice?.data?.source?.kind),
+);
+check(
+  "提示不再带老写法的 source.plugin 字段",
+  notice?.data?.source?.plugin === undefined,
+  String(notice?.data?.source?.plugin),
+);
 check("提示的 source.form 是 notice", notice?.data?.source?.form === "notice");
 check("提示带一行摘要", typeof notice?.data?.source?.summary === "string" && notice.data.source.summary.length > 0);
 check("提示带 surfaceOp: append", notice?.surfaceOp === "append");
@@ -237,6 +260,17 @@ check("同一个检查点不重复提示", session.noticeCount() === 1, `条数=
 session.addCompactionCheckpoint("c-2");
 await step(session);
 check("又压缩一次会再提示一条", session.noticeCount() === 2, `条数=${session.noticeCount()}`);
+
+// v3 迁移前的老写法检查点同样要认：还没迁到 v4 的会话，表层里就是它。
+const legacySession = makeSession();
+legacySession.addHuman("开始干活");
+legacySession.addCompactionCheckpoint("c-legacy", { legacy: true });
+await step(legacySession);
+check(
+  "v3 老写法（plugin: compact）的检查点也提示",
+  legacySession.noticeCount() === 1,
+  `条数=${legacySession.noticeCount()}`,
+);
 
 // ---------------------------------------------------------------- 拒绝与中止
 

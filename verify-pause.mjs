@@ -162,7 +162,9 @@ function makeStep(sessionId, { human = false } = {}) {
   };
   const payload = {
     agent: { session: { id: sessionId } },
-    messages: human ? [{ source: { kind: "user" } }] : [{ source: { kind: "plugin" } }],
+    messages: human
+      ? [{ source: { kind: "user" } }]
+      : [{ source: { kind: "plugin:dsh-tree-task-flow", form: "notice", summary: "计划续行" } }],
     turn: 1,
     step: 2,
     signal: controller.signal,
@@ -365,8 +367,9 @@ console.log("\n跨重启的那次继续：把 idle 会话推起来：");
     check("推了一次", outcome.woke === true && agents.followed.length === 1);
     check(
       "推的是插件自己的「恢复续行」消息",
-      agents.followed[0]?.message?.source?.plugin === "dsh-tree-task-flow" &&
+      agents.followed[0]?.message?.source?.kind === "plugin:dsh-tree-task-flow" &&
         agents.followed[0]?.message?.source?.summary === "恢复续行",
+      JSON.stringify(agents.followed[0]?.message?.source),
     );
     check(
       "正文非空（告诉模型接着干什么）",

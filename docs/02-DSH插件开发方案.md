@@ -148,8 +148,22 @@ DSH 已有 goal、todo、plan mode 三套任务相关设施，但都不解决这
 ```
 role:    user
 content: [{ type: "text", text: "tree_task消息：" + <完成通告> }]
-source:  { kind: "plugin", plugin: "dsh-tree-task-flow", form: "notice", summary: <一行摘要> }
+source:  { kind: "plugin:dsh-tree-task-flow", form: "notice", summary: <一行摘要> }
 ```
+
+**`kind` 必须是 `plugin:<包名>`，不能写 `{ kind: "plugin", plugin: "<包名>" }`。**
+DSH 的会话格式 v4 要求消息来源带"生产者自有的"kind，老写法只在 v3 → v4 迁移那一刻
+被改写成 `plugin:<包名>`；**已经是 v4 的会话不走迁移**，写入时直接按 v4 校验，
+于是被拒：
+
+```
+format v4 message requires a producer-owned source kind
+```
+
+这条错误出在 DSH 自己的落盘路径上，插件里的 `try/catch` 拦不住——实测（2026-10-08）
+会让整轮直接失败、会话停在原地起不来。所以写入侧只写新形状；读取侧（认自己落下的
+通告、认压缩检查点）**两种形状都认**，因为没迁移过的老会话里仍是老样子。
+见 `lib/region.js` 的 `PLUGIN_SOURCE_KIND` 与 `verify-source.mjs`。
 
 正文固定以 `tree_task消息：` 打头，只报"这一段被收走了、哪些节点完成了"：
 
@@ -198,9 +212,12 @@ DSH 自己的压缩（`@deepseek-ai/dsh-compaction-basic`）在上下文用到�
 其余整段换成一条结构化检查点消息。**计划树不在压缩范围内**——它是磁盘上的
 `plans/<sessionId>.json`，压缩碰不到它，但模型会忘掉它。
 
-于是 `lib/compaction.js` 补一条提醒：认出表层上那条压缩检查点（`source` 标记为
-`plugin: "compact"` 的 `user/message`），如果这个会话有计划树，就注入一条
-`tree_task消息：上下文刚被压缩过…用 tree_task_status 取回当前进度…`。
+于是 `lib/compaction.js` 补一条提醒：认出表层上那条压缩检查点，如果这个会话有计划树，
+就注入一条 `tree_task消息：上下文刚被压缩过…用 tree_task_status 取回当前进度…`。
+
+检查点认**两种 source 形状**：v4 原生的 `{ kind: "compact-checkpoint", compactionId, … }`，
+与还没迁移的老会话里的 `{ kind: "plugin", plugin: "compact" }`。只认老写法会让已经迁到
+v4 的会话彻底收不到这条提醒。
 
 四个实现要点：
 
